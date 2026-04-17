@@ -27,7 +27,13 @@ in {
     modelsDir = lib.mkOption {
       type    = lib.types.str;
       default = "/var/lib/llama-models";
-      description = "Path to the directory containing model subdirectories.";
+      description = "Path to the directory containing model subdirectories. Must be group-writable by serviceGroup.";
+    };
+
+    hfHome = lib.mkOption {
+      type    = lib.types.str;
+      default = "${cfg.modelsDir}/.hf-cache";
+      description = "Path for HuggingFace Hub state (HF_HOME). Created automatically; parent directory must already exist.";
     };
 
     llamaServerURL = lib.mkOption {
@@ -62,8 +68,8 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
-    # Create the service user if using the default name.
-    # If you set serviceUser to an existing user, manage it yourself.
+    # Create the service user when using the default name.
+    # If serviceUser is set to an existing user, manage it yourself.
     users.users.${cfg.serviceUser} = lib.mkIf (cfg.serviceUser == "gguf-manager") {
       isSystemUser = true;
       group        = cfg.serviceGroup;
@@ -78,27 +84,23 @@ in {
       path = [ pkgs.python3Packages.huggingface-hub ];
 
       environment = {
-        # hf writes its cache and token file here; without this it tries /.cache
-        HF_HOME = "/var/lib/gguf-manager";
+        # lib.mkDefault allows override in configuration.nix without a conflict error.
+        HF_HOME = lib.mkDefault cfg.hfHome;
       };
 
       serviceConfig = {
-        ExecStart      = "${cfg.package}/bin/gguf-manager --config ${configFile}";
-        User           = cfg.serviceUser;
-        Group          = cfg.serviceGroup;
-        Restart        = "on-failure";
-        RestartSec     = "5s";
-
-        # Persistent state dir: /var/lib/gguf-manager (owned by service user)
-        StateDirectory     = "gguf-manager";
-        StateDirectoryMode = "0750";
+        ExecStart  = "${cfg.package}/bin/gguf-manager --config ${configFile}";
+        User       = cfg.serviceUser;
+        Group      = cfg.serviceGroup;
+        Restart    = "on-failure";
+        RestartSec = "5s";
       };
     };
 
-    # Ensure modelsDir exists and is group-writable so the service user can
-    # create model subdirectories in it.
+    # Create hfHome directory. The parent (modelsDir) must already exist —
+    # typically created by the llama-cpp service or a tmpfiles rule in your config.
     systemd.tmpfiles.rules = [
-      "d ${cfg.modelsDir} 0775 root ${cfg.serviceGroup} -"
+      "d ${cfg.hfHome} 0775 ${cfg.serviceUser} ${cfg.serviceGroup} -"
     ];
 
     # Allow the service user to restart the llama service without root.

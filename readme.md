@@ -119,56 +119,79 @@ rules files without a restart.
 
 ## NixOS
 
-Import the flake and the NixOS module:
+### flake.nix
+
+Add gguf-manager as a flake input and import the NixOS module:
 
 ```nix
-# flake.nix inputs
-gguf-manager.url = "github:emanspeaks/gguf-manager";
+{
+  inputs = {
+    nixpkgs.url     = "github:NixOS/nixpkgs/nixos-unstable";
+    gguf-manager.url = "github:emanspeaks/gguf-manager";
+    # ... your other inputs
+  };
+
+  outputs = inputs@{ self, nixpkgs, gguf-manager, ... }: {
+    nixosConfigurations.myhostname = nixpkgs.lib.nixosSystem {
+      modules = [
+        ./configuration.nix
+        gguf-manager.nixosModules.default
+        {
+          services.gguf-manager = {
+            enable         = true;
+            package        = gguf-manager.packages.x86_64-linux.default;
+            modelsDir      = "/var/lib/llama-models";
+            llamaServerURL = "http://localhost:9292";
+            llamaService   = "llama-cpp.service";
+            # hfToken = "hf_...";  # see note below about secrets
+          };
+        }
+      ];
+    };
+  };
+}
 ```
 
-```nix
-# NixOS configuration
-imports = [ gguf-manager.nixosModules.default ];
+> **HF token**: avoid committing real tokens in flake.nix. Use a secrets manager
+> such as [agenix](https://github.com/ryantm/agenix) or
+> [sops-nix](https://github.com/Mic92/sops-nix), or set `HF_TOKEN` in your
+> service environment from a secrets file.
 
-services.gguf-manager = {
-  enable         = true;
-  package        = gguf-manager.packages.${system}.default;
-  modelsDir      = "/var/lib/llama-models";
-  llamaServerURL = "http://localhost:9292";
-  llamaService   = "llama-cpp.service";
-  # hfToken      = "";  # set if needed
-};
-```
+### configuration.nix additions
 
-The module does the following automatically when enabled:
+The module creates the `gguf-manager` system user automatically, but you need
+to ensure:
 
-- Creates a `gguf-manager` system user in the `llm` group
-- Sets `HF_HOME=/var/lib/gguf-manager` so the `hf` tool can write its cache
-  (without this it tries to write to `/.cache` and fails)
-- Creates `/var/lib/gguf-manager` as a persistent state directory owned by the
-  service user
-- Creates `modelsDir` (`/var/lib/llama-models` by default) as a group-writable
-  directory so the service user can write model subdirectories into it
-- Installs a polkit rule allowing the service user to restart `llamaService` via
-  D-Bus without root
-
-### Required: add the service user to your llm group
-
-The `llm` group must exist and `modelsDir` must be writable by it. Make sure your
-`configuration.nix` includes the group and any other users who need access:
+**1. The `llm` group exists and includes the right members.**
+If you use `services.llama-cpp`, that module creates the `llm` group. Add your
+own username and any other users who need model access:
 
 ```nix
 users.groups.llm.members = [ "your-username" "llama-cpp" "gguf-manager" ];
 ```
 
-If `modelsDir` is managed by your llama-cpp setup rather than the gguf-manager
-module, ensure it has `0775` permissions with group `llm`:
+**2. The models directory exists and is group-writable by `llm`.**
+This is typically managed by your llama-cpp setup. If not already present, add
+a tmpfiles rule — note the directory should be owned by `llama-cpp` (or
+whatever user llama-server runs as), not `gguf-manager`:
 
 ```nix
 systemd.tmpfiles.rules = [
   "d /var/lib/llama-models 0775 llama-cpp llm -"
 ];
 ```
+
+The module creates the `.hf-cache` subdirectory inside `modelsDir` automatically,
+so you do **not** need a tmpfiles rule for it.
+
+### What the module handles automatically
+
+| Thing | How |
+|---|---|
+| `gguf-manager` system user | `users.users.gguf-manager` with `isSystemUser = true` |
+| `HF_HOME` | Set to `${modelsDir}/.hf-cache` so `hf` never tries to write to `/.cache` |
+| `.hf-cache` directory | Created via `systemd.tmpfiles` owned by the service user |
+| polkit rule | Allows service user to restart `llamaService` via D-Bus without root |
 
 If you run the binary outside the module, see the
 [Polkit setup](#polkit-setup) section above.
