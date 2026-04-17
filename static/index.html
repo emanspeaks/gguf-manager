@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>gguf-manager</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #f0f2f5; color: #1a1a1a; min-height: 100vh; }
+  header {
+    background: #0f172a; color: #f8fafc; padding: 0.875rem 1.5rem;
+    display: flex; align-items: center; gap: 1.5rem;
+  }
+  header h1 { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.01em; }
+  #status-indicator { font-size: 0.8rem; padding: 3px 10px; border-radius: 12px; }
+  .status-online  { background: #166534; color: #bbf7d0; }
+  .status-offline { background: #7f1d1d; color: #fecaca; }
+  .status-unknown { background: #374151; color: #d1d5db; }
+  main {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;
+    padding: 1.25rem; max-width: 1280px; margin: 0 auto;
+  }
+  @media (max-width: 768px) { main { grid-template-columns: 1fr; } }
+  section {
+    background: #fff; border-radius: 10px; padding: 1.25rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+  .section-header h2 { font-size: 1rem; font-weight: 600; }
+  /* Buttons */
+  button { cursor: pointer; border: none; border-radius: 5px; font-size: 0.825rem; font-weight: 500; padding: 5px 12px; transition: background 0.15s; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-primary  { background: #2563eb; color: #fff; }
+  .btn-primary:hover:not(:disabled)  { background: #1d4ed8; }
+  .btn-danger   { background: #dc2626; color: #fff; }
+  .btn-danger:hover:not(:disabled)   { background: #b91c1c; }
+  .btn-secondary { background: #64748b; color: #fff; }
+  .btn-secondary:hover:not(:disabled) { background: #475569; }
+  /* Model cards */
+  #local-list { display: flex; flex-direction: column; gap: 0.5rem; }
+  .model-card {
+    display: flex; align-items: center; justify-content: space-between;
+    border: 1px solid #e5e7eb; border-radius: 7px; padding: 0.625rem 0.75rem;
+  }
+  .model-meta { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .model-name { font-size: 0.875rem; font-weight: 500; word-break: break-all; }
+  .model-detail { font-size: 0.75rem; color: #6b7280; }
+  .badge { font-size: 0.7rem; font-weight: 600; padding: 2px 7px; border-radius: 10px; white-space: nowrap; }
+  .badge-loaded   { background: #dcfce7; color: #166534; }
+  .badge-unloaded { background: #f1f5f9; color: #64748b; }
+  /* Right panel form */
+  .hint { font-size: 0.8rem; color: #6b7280; margin-bottom: 0.875rem; }
+  .hint a { color: #2563eb; }
+  .input-row { display: flex; gap: 0.5rem; margin-bottom: 0.875rem; }
+  input[type="text"] {
+    flex: 1; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 5px;
+    font-size: 0.875rem; outline: none;
+  }
+  input[type="text"]:focus { border-color: #2563eb; box-shadow: 0 0 0 2px #dbeafe; }
+  /* File list */
+  #repo-results { display: flex; flex-direction: column; gap: 0; }
+  .file-row {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.5rem 0; border-bottom: 1px solid #f1f5f9;
+  }
+  .file-row:last-child { border-bottom: none; }
+  .file-name { font-size: 0.8rem; font-family: monospace; flex: 1; word-break: break-all; color: #374151; }
+  .file-size { font-size: 0.75rem; color: #9ca3af; white-space: nowrap; }
+  /* Download log */
+  #download-section { margin-top: 1rem; }
+  #download-label { font-size: 0.8rem; font-weight: 600; color: #374151; margin-bottom: 0.375rem; }
+  #log-box {
+    background: #0f172a; color: #e2e8f0; font-family: 'Menlo', 'Consolas', monospace;
+    font-size: 0.75rem; line-height: 1.5; padding: 0.75rem; border-radius: 6px;
+    height: 220px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+  }
+  /* Error / empty messages */
+  .msg-error { color: #dc2626; font-size: 0.825rem; margin-top: 0.5rem; }
+  .msg-empty { color: #9ca3af; font-size: 0.825rem; font-style: italic; text-align: center; padding: 1rem 0; }
+  .msg-loading { color: #6b7280; font-size: 0.825rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>gguf-manager</h1>
+  <span id="status-indicator" class="status-unknown">connecting…</span>
+</header>
+<main>
+  <!-- Left panel: Local Models -->
+  <section>
+    <div class="section-header">
+      <h2>Local Models</h2>
+      <button class="btn-secondary" id="refresh-btn">Refresh</button>
+    </div>
+    <div id="local-error" class="msg-error" style="display:none"></div>
+    <div id="local-list"><p class="msg-loading">Loading…</p></div>
+  </section>
+
+  <!-- Right panel: Add Model -->
+  <section>
+    <div class="section-header">
+      <h2>Add Model</h2>
+    </div>
+    <p class="hint">
+      Find models at
+      <a href="https://huggingface.co/models?library=gguf" target="_blank" rel="noopener">HuggingFace GGUF models</a>
+    </p>
+    <label for="repo-input" style="font-size:0.825rem;font-weight:500;display:block;margin-bottom:4px">HuggingFace repo ID</label>
+    <div class="input-row">
+      <input type="text" id="repo-input" placeholder="e.g. unsloth/Qwen3-Coder-Next-GGUF" autocomplete="off" spellcheck="false">
+      <button class="btn-primary" id="browse-btn">Browse</button>
+    </div>
+    <div id="repo-error" class="msg-error" style="display:none"></div>
+    <div id="repo-results"></div>
+
+    <div id="download-section" style="display:none">
+      <div id="download-label">Download log</div>
+      <pre id="log-box"></pre>
+    </div>
+    <div id="download-error" class="msg-error" style="display:none"></div>
+  </section>
+</main>
+
+<script>
+'use strict';
+
+let downloadInProgress = false;
+let activeEventSource = null;
+
+// ── Utilities ──────────────────────────────────────────────────────────────
+
+function esc(str) {
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function formatBytes(n) {
+  if (n == null) return 'unknown';
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
+  return (n / 1073741824).toFixed(2) + ' GB';
+}
+
+function showErr(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.style.display = msg ? 'block' : 'none';
+}
+
+function clearErr(id) { showErr(id, ''); }
+
+// ── Local models ───────────────────────────────────────────────────────────
+
+async function fetchLocalModels() {
+  clearErr('local-error');
+  try {
+    const resp = await fetch('/api/local');
+    if (!resp.ok) throw new Error(await resp.text());
+    const models = await resp.json();
+    renderLocalModels(models);
+  } catch (e) {
+    showErr('local-error', 'Failed to load local models: ' + e.message);
+    document.getElementById('local-list').innerHTML = '';
+  }
+}
+
+function renderLocalModels(models) {
+  const list = document.getElementById('local-list');
+  if (!models.length) {
+    list.innerHTML = '<p class="msg-empty">No models found in models directory.</p>';
+    return;
+  }
+  list.innerHTML = '';
+  for (const m of models) {
+    const card = document.createElement('div');
+    card.className = 'model-card';
+    card.innerHTML = `
+      <div class="model-meta">
+        <span class="model-name">${esc(m.name)}</span>
+        <span class="model-detail">
+          ${esc(formatBytes(m.sizeBytes))} &middot; ${m.files.length} file${m.files.length !== 1 ? 's' : ''}
+          &nbsp;<span class="badge ${m.loaded ? 'badge-loaded' : 'badge-unloaded'}">${m.loaded ? 'Loaded' : 'Unloaded'}</span>
+        </span>
+      </div>
+      <button class="btn-danger delete-btn">Delete</button>
+    `;
+    card.querySelector('.delete-btn').addEventListener('click', () => deleteModel(m.name));
+    list.appendChild(card);
+  }
+}
+
+async function deleteModel(name) {
+  if (!confirm(`Delete model "${name}"?\n\nThis will remove all files and cannot be undone.`)) return;
+  clearErr('local-error');
+  try {
+    const resp = await fetch('/api/local/' + encodeURIComponent(name), { method: 'DELETE' });
+    if (resp.status === 404) { showErr('local-error', 'Model not found.'); return; }
+    if (!resp.ok) throw new Error(await resp.text());
+    fetchLocalModels();
+  } catch (e) {
+    showErr('local-error', 'Delete failed: ' + e.message);
+  }
+}
+
+// ── Repo browser ───────────────────────────────────────────────────────────
+
+async function browseRepo() {
+  const repoId = document.getElementById('repo-input').value.trim();
+  if (!repoId) return;
+  clearErr('repo-error');
+  const results = document.getElementById('repo-results');
+  results.innerHTML = '<p class="msg-loading">Fetching file list…</p>';
+  try {
+    const resp = await fetch('/api/repo?id=' + encodeURIComponent(repoId));
+    if (!resp.ok) throw new Error(await resp.text());
+    const files = await resp.json();
+    renderRepoFiles(repoId, files);
+  } catch (e) {
+    results.innerHTML = '';
+    showErr('repo-error', 'Failed to fetch repo: ' + e.message);
+  }
+}
+
+function renderRepoFiles(repoId, files) {
+  const results = document.getElementById('repo-results');
+  if (!files.length) {
+    results.innerHTML = '<p class="msg-empty">No GGUF files found in this repo.</p>';
+    return;
+  }
+  results.innerHTML = '';
+  for (const f of files) {
+    const row = document.createElement('div');
+    row.className = 'file-row';
+    row.innerHTML = `
+      <span class="file-name">${esc(f.filename)}</span>
+      <span class="file-size">${esc(formatBytes(f.size))}</span>
+      <button class="btn-primary dl-btn" ${downloadInProgress ? 'disabled' : ''}>Download</button>
+    `;
+    row.querySelector('.dl-btn').addEventListener('click', () => startDownload(repoId, f.filename));
+    results.appendChild(row);
+  }
+}
+
+// ── Download ───────────────────────────────────────────────────────────────
+
+async function startDownload(repoId, filename) {
+  if (downloadInProgress) return;
+  clearErr('download-error');
+  try {
+    const resp = await fetch('/api/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repoId, filename }),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+  } catch (e) {
+    showErr('download-error', 'Failed to start download: ' + e.message);
+    return;
+  }
+  setDownloadState(true);
+  openSSE();
+}
+
+function openSSE() {
+  if (activeEventSource) {
+    activeEventSource.close();
+    activeEventSource = null;
+  }
+
+  const section = document.getElementById('download-section');
+  const logBox = document.getElementById('log-box');
+  section.style.display = 'block';
+  logBox.textContent = '';
+
+  const es = new EventSource('/api/download/status');
+  activeEventSource = es;
+
+  es.addEventListener('line', (e) => {
+    appendLog(JSON.parse(e.data));
+  });
+
+  es.addEventListener('status', (e) => {
+    const msg = JSON.parse(e.data);
+    es.close();
+    activeEventSource = null;
+    if (msg.status === 'done') {
+      appendLog('[download finished]');
+      setDownloadState(false);
+      fetchLocalModels();
+    } else if (msg.status === 'idle') {
+      appendLog('[no active download]');
+      setDownloadState(false);
+    }
+  });
+
+  es.onerror = () => {
+    es.close();
+    activeEventSource = null;
+    appendLog('[connection lost]');
+    setDownloadState(false);
+  };
+}
+
+function appendLog(line) {
+  const logBox = document.getElementById('log-box');
+  logBox.textContent += line + '\n';
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+function setDownloadState(inProgress) {
+  downloadInProgress = inProgress;
+  document.querySelectorAll('.dl-btn').forEach(btn => {
+    btn.disabled = inProgress;
+  });
+}
+
+// ── Status polling ─────────────────────────────────────────────────────────
+
+async function pollStatus() {
+  try {
+    const resp = await fetch('/api/status');
+    if (!resp.ok) return;
+    const s = await resp.json();
+    const el = document.getElementById('status-indicator');
+    el.textContent = s.llamaReachable ? 'llama-server: online' : 'llama-server: offline';
+    el.className = s.llamaReachable ? 'status-online' : 'status-offline';
+    // Sync download state if we missed a completion event
+    if (!s.downloadInProgress && downloadInProgress && !activeEventSource) {
+      setDownloadState(false);
+    }
+  } catch (_) { /* network error, ignore */ }
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+
+document.getElementById('refresh-btn').addEventListener('click', fetchLocalModels);
+document.getElementById('browse-btn').addEventListener('click', browseRepo);
+document.getElementById('repo-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') browseRepo();
+});
+
+fetchLocalModels();
+pollStatus();
+setInterval(pollStatus, 5000);
+</script>
+</body>
+</html>
