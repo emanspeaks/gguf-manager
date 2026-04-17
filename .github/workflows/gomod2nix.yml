@@ -5,6 +5,7 @@ on:
     paths:
       - go.mod
       - go.sum
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -29,9 +30,9 @@ jobs:
 
       - name: Commit if changed
         run: |
-          git diff --quiet gomod2nix.toml && exit 0
+          git add gomod2nix.toml
+          git diff --cached --quiet && exit 0
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add gomod2nix.toml
           git commit -m "nix: regenerate gomod2nix.toml"
           git push
