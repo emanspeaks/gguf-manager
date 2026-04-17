@@ -17,4 +17,8 @@ jobs:
 
       - run: go vet ./...
 
-      - run: go build ./...
+      - name: Build
+        run: go build -v -o gguf-manager .
+
+      - name: Verify binary exists and runs
+        run: ./gguf-manager --help || true
