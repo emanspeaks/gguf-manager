@@ -16,9 +16,7 @@
           version = "0.1.0";
           src     = ./.;
 
-          # Run `nix build` once; it will print the correct hash in the error.
-          # Replace the placeholder below with that value.
-          vendorHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+          vendorHash = "";
 
           meta = {
             description = "Local web UI for managing GGUF models with llama-server";
