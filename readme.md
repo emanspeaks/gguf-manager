@@ -64,30 +64,58 @@ pass it with `--config`:
 
 ## Polkit setup
 
-gguf-manager restarts the llama-server via D-Bus (`systemd1.manage-units`).
-By default this requires elevated privileges — you'll see
-`connection reset by peer` errors without it.
+gguf-manager restarts llama-server via D-Bus (`org.freedesktop.systemd1.manage-units`).
+Without a polkit rule granting this permission to the process user, you'll see
+`connection reset by peer` in the status bar when restarting or after a download.
 
-**NixOS**: the polkit rule is installed automatically by the NixOS module (see
-below). No manual action required.
+### NixOS — using the service module
 
-**Other systemd distros**: drop a rules file into `/etc/polkit-1/rules.d/`:
+Enable `services.gguf-manager` (see [NixOS](#nixos) section below). The module
+installs the polkit rule automatically for the service user. No further action needed.
+
+### NixOS — running the binary directly
+
+If you're running the binary outside of the NixOS module (e.g. from a nix shell,
+`nix run`, or a hand-written systemd unit), the polkit rule is **not** installed
+automatically. Add it to your `configuration.nix`:
+
+```nix
+security.polkit.extraConfig = ''
+  polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "llama-cpp.service" &&
+        subject.user == "your-username") {
+      return polkit.Result.YES;
+    }
+  });
+'';
+```
+
+Replace `your-username` with the OS user running gguf-manager and
+`llama-cpp.service` with your actual service name if it differs. Then rebuild:
+
+```sh
+sudo nixos-rebuild switch
+```
+
+### Other systemd distros
+
+Drop a rules file into `/etc/polkit-1/rules.d/`:
 
 ```sh
 sudo tee /etc/polkit-1/rules.d/50-gguf-manager.rules <<'EOF'
 polkit.addRule(function(action, subject) {
   if (action.id == "org.freedesktop.systemd1.manage-units" &&
       action.lookup("unit") == "llama-cpp.service" &&
-      subject.user == "YOUR_SERVICE_USER") {
+      subject.user == "your-username") {
     return polkit.Result.YES;
   }
 });
 EOF
 ```
 
-Replace `YOUR_SERVICE_USER` with the OS user gguf-manager runs as, and
-`llama-cpp.service` with your actual service name if it differs. Polkit picks
-up new rules files without a restart.
+Replace `your-username` and `llama-cpp.service` as above. Polkit picks up new
+rules files without a restart.
 
 ## NixOS
 
@@ -111,8 +139,10 @@ services.gguf-manager = {
 };
 ```
 
-The service runs as the `llama-cpp` user in the `llm` group and is granted a
-polkit rule that lets it restart `llama-cpp.service` via D-Bus without root.
+The service runs as the `llama-cpp` user in the `llm` group. Enabling the module
+also installs a polkit rule that allows the service user to restart
+`llama-cpp.service` via D-Bus without root. If you run the binary any other way,
+see the [Polkit setup](#polkit-setup) section above.
 
 ### Nix dependencies
 
