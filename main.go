@@ -7,14 +7,24 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 )
 
 //go:embed static
 var staticFiles embed.FS
 
+// version is injected at build time via -ldflags "-X main.version=..."
+var version = "dev"
+
 func main() {
 	configPath := flag.String("config", "", "path to JSONC config file")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		os.Exit(0)
+	}
 
 	cfg, err := loadConfig(*configPath)
 	if err != nil {
@@ -39,7 +49,7 @@ func main() {
 	mux.HandleFunc("GET /api/status", srv.handleStatus)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
-	log.Printf("gguf-manager listening on %s", addr)
+	log.Printf("gguf-manager %s listening on %s", version, addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
 	}
