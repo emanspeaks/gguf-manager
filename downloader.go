@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -257,6 +258,7 @@ func (d *downloader) start(repoID string, filenames []string, sidecarFiles []str
 	ctx, cancelFn := context.WithCancel(context.Background())
 	d.cancel = cancelFn
 
+	log.Printf("download starting: repo=%s files=%v sidecars=%v dir=%s", repoID, filenames, sidecarFiles, destDir)
 	go d.run(ctx, repoID, patterns, sidecarFiles, destDir, modelName, oldDir)
 	return nil
 }
@@ -394,6 +396,7 @@ func (d *downloader) run(ctx context.Context, repoID string, patterns []string, 
 
 	if err := cmd.Wait(); err != nil {
 		if ctx.Err() != nil {
+			log.Printf("download cancelled: %s", modelName)
 			d.appendLine("[w84ggufman] download cancelled")
 		} else {
 			d.restoreOnFailure(oldDir, destDir)
@@ -435,6 +438,7 @@ func (d *downloader) run(ctx context.Context, repoID string, patterns []string, 
 		d.appendLine(fmt.Sprintf("[w84ggufman] warning: could not update managed.ini: %v", err))
 	}
 
+	log.Printf("download complete: %s", modelName)
 	d.appendLine("[w84ggufman] download complete, restarting service...")
 	if err := restartService(d.cfg.LlamaService); err != nil {
 		d.appendLine(fmt.Sprintf("[w84ggufman] warning: failed to restart service: %v", err))
@@ -463,6 +467,7 @@ func (d *downloader) restoreOnFailure(oldDir, destDir string) {
 }
 
 func (d *downloader) finishWithError(err error) {
+	log.Printf("download error: %v", err)
 	d.mu.Lock()
 	d.lines = append(d.lines, fmt.Sprintf("[error] %v", err))
 	d.busy = false
