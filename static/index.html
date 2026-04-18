@@ -646,9 +646,11 @@ function quantDisplayName(filename, prefix) {
 
 // Bit depth is the first digit run after a known quant family prefix.
 // Known families: IQ, TQ, BF, MXFP, NVFP, Q, F (longest-first for alternation).
-// Strips leading UD- variant prefix before matching.
+// Strips leading UD- variant prefix, then matches at start-of-string (when the
+// common prefix has been stripped) or after a separator (when the full filename
+// is used as the display name because there was no common prefix to strip).
 function quantBitDepth(displayName) {
-  const m = displayName.replace(/^UD-/i, '').match(/^(?:IQ|TQ|BF|MXFP|NVFP|[QF])(\d+)/i);
+  const m = displayName.replace(/^UD-/i, '').match(/(?:^|[-_.])(?:IQ|TQ|BF|MXFP|NVFP|[QF])(\d+)/i);
   return m ? parseInt(m[1]) : 999;
 }
 
@@ -753,7 +755,7 @@ function renderRepoInfo(repoId, info) {
       companionEl.className = 'companion-section';
       const items = sidecars.map((s, i) =>
         `<div class="sidecar-row">
-          <input type="checkbox" class="sidecar-cb" data-idx="${i}">
+          <input type="checkbox" class="sidecar-cb" data-idx="${i}" checked>
           <span class="sidecar-name">${esc(s.filename)}</span>
           ${s.size != null ? `<span class="sidecar-size">${esc(formatBytes(s.size))}</span>` : ''}
         </div>`
