@@ -174,10 +174,12 @@ func (s *server) handleDeleteLocal(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "model not found", http.StatusNotFound)
 		return
 	}
-	if err := os.RemoveAll(modelDir); err != nil {
+	if err := removeAllWritable(modelDir); err != nil {
+		log.Printf("error: delete model %q: %v", name, err)
 		http.Error(w, "failed to delete: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	log.Printf("deleted model %q", name)
 	if err := s.preset.RemoveModel(name); err != nil {
 		log.Printf("warning: failed to remove %s from managed.ini: %v", name, err)
 	}
@@ -330,9 +332,11 @@ func (s *server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.dl.start(req.RepoID, req.Filenames, req.SidecarFiles, req.TotalBytes, req.Force); err != nil {
+		log.Printf("error: start download %s %v: %v", req.RepoID, req.Filenames, err)
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
+	log.Printf("download queued: %s %v", req.RepoID, req.Filenames)
 	w.WriteHeader(http.StatusAccepted)
 }
 
@@ -346,10 +350,13 @@ func (s *server) handleDownloadStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleRestart(w http.ResponseWriter, r *http.Request) {
+	log.Printf("restarting service %s", s.cfg.LlamaService)
 	if err := restartService(s.cfg.LlamaService); err != nil {
+		log.Printf("error: restart %s: %v", s.cfg.LlamaService, err)
 		http.Error(w, "failed to restart service: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	log.Printf("service %s restarted", s.cfg.LlamaService)
 	w.WriteHeader(http.StatusNoContent)
 }
 
