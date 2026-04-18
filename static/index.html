@@ -10,6 +10,7 @@
     font-family: system-ui, -apple-system, sans-serif;
     background: #0f172a; color: #e2e8f0;
     min-height: 100vh; padding-bottom: 36px;
+    transition: background 0.2s, color 0.2s;
   }
   /* ── Header ──────────────────────────────────────────────────────────── */
   header {
@@ -34,6 +35,13 @@
   }
   .btn-restart:hover:not(:disabled) { background: #1e293b; color: #f1f5f9; }
   .btn-restart:disabled { opacity: 0.45; cursor: not-allowed; }
+  #theme-toggle {
+    background: transparent; border: 1px solid #334155; color: #94a3b8;
+    font-size: 0.85rem; padding: 4px 8px; border-radius: 5px;
+    cursor: pointer; line-height: 1; flex-shrink: 0;
+    transition: background 0.15s, color 0.15s;
+  }
+  #theme-toggle:hover { background: #1e293b; color: #f1f5f9; }
   /* ── Layout ──────────────────────────────────────────────────────────── */
   main {
     display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;
@@ -140,6 +148,48 @@
     user-select: text; cursor: text;
   }
   #status-log .log-line { display: block; }
+
+  /* ── Light mode ──────────────────────────────────────────────────────── */
+  html.light body            { background: #f8fafc; color: #0f172a; }
+  html.light header          { background: #f1f5f9; color: #0f172a; border-bottom-color: #cbd5e1; }
+  html.light #app-version    { color: #94a3b8; }
+  html.light #theme-toggle   { border-color: #cbd5e1; color: #475569; }
+  html.light #theme-toggle:hover { background: #e2e8f0; color: #0f172a; }
+  html.light .btn-restart    { border-color: #cbd5e1; color: #475569; }
+  html.light .btn-restart:hover:not(:disabled) { background: #e2e8f0; color: #0f172a; }
+  html.light section         { background: #ffffff; border-color: #e2e8f0; }
+  html.light .section-header h2 { color: #1e293b; }
+  html.light .btn-secondary  { background: #e2e8f0; color: #475569; }
+  html.light .btn-secondary:hover:not(:disabled) { background: #cbd5e1; color: #0f172a; }
+  html.light .model-card     { background: #f8fafc; border-color: #e2e8f0; }
+  html.light .model-name     { color: #1e293b; }
+  html.light .model-detail   { color: #94a3b8; }
+  html.light .badge-loaded   { background: #dcfce7; color: #166534; }
+  html.light .badge-unloaded { background: #f1f5f9; color: #94a3b8; }
+  html.light .hint           { color: #94a3b8; }
+  html.light .hint a         { color: #2563eb; }
+  html.light .hint a:hover   { color: #1d4ed8; }
+  html.light label           { color: #475569; }
+  html.light input[type="text"] { background: #fff; border-color: #cbd5e1; color: #0f172a; }
+  html.light input[type="text"]::placeholder { color: #94a3b8; }
+  html.light .file-row       { border-bottom-color: #e2e8f0; }
+  html.light .file-name      { color: #475569; }
+  html.light .file-size      { color: #94a3b8; }
+  html.light .msg-error      { color: #dc2626; }
+  html.light .msg-empty      { color: #94a3b8; }
+  html.light .msg-loading    { color: #94a3b8; }
+  html.light .status-online  { background: #dcfce7; color: #166534; }
+  html.light .status-offline { background: #fee2e2; color: #991b1b; }
+  html.light .status-unknown { background: #f1f5f9; color: #64748b; }
+  html.light #status-bar     { background: #f1f5f9; color: #64748b; border-top-color: #e2e8f0; }
+  html.light #status-bar.active { border-top-color: #3b82f6; }
+  html.light #status-resize-handle { background: #e2e8f0; }
+  html.light #status-resize-handle:hover,
+  html.light #status-resize-handle.dragging { background: #cbd5e1; }
+  html.light #status-log     { border-top-color: #e2e8f0; color: #64748b; }
+  html.light #status-bar-label { color: #94a3b8; border-right-color: #e2e8f0; }
+  html.light #status-bar.active #status-bar-text { color: #0f172a; }
+  html.light #status-bar-chevron { color: #cbd5e1; }
 </style>
 </head>
 <body>
@@ -149,6 +199,7 @@
     <span id="app-version"></span>
   </div>
   <span id="status-indicator" class="status-unknown">connecting…</span>
+  <button id="theme-toggle" title="Toggle light/dark mode">☀</button>
   <button class="btn-restart" id="restart-btn">Restart Service</button>
 </header>
 <main>
@@ -199,6 +250,21 @@
 
 let downloadInProgress = false;
 let activeEventSource = null;
+
+// ── Theme ──────────────────────────────────────────────────────────────────
+
+(function initTheme() {
+  const stored = localStorage.getItem('theme');
+  const isLight = stored === 'light';
+  if (isLight) document.documentElement.classList.add('light');
+  document.getElementById('theme-toggle').textContent = isLight ? '🌙' : '☀';
+})();
+
+document.getElementById('theme-toggle').addEventListener('click', () => {
+  const isLight = document.documentElement.classList.toggle('light');
+  localStorage.setItem('theme', isLight ? 'light' : 'dark');
+  document.getElementById('theme-toggle').textContent = isLight ? '🌙' : '☀';
+});
 
 // ── Utilities ──────────────────────────────────────────────────────────────
 
@@ -253,7 +319,6 @@ function toggleStatusBar() {
   }
 }
 
-// Toggle on the bottom row only — not on the log text or resize handle.
 document.getElementById('status-bar-main').addEventListener('click', toggleStatusBar);
 
 // ── Log resize ─────────────────────────────────────────────────────────────
@@ -465,7 +530,7 @@ async function pollStatus() {
     const s = await resp.json();
     const el = document.getElementById('status-indicator');
     el.textContent = s.llamaReachable ? 'llama-server: online' : 'llama-server: offline';
-    el.className = s.llamaReachable ? 'status-online' : 'status-offline';
+    el.className = 'status-indicator ' + (s.llamaReachable ? 'status-online' : 'status-offline');
     if (s.version) {
       const ver = document.getElementById('app-version');
       if (!ver.textContent) ver.textContent = s.version;
