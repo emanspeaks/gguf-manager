@@ -15,12 +15,14 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
         inherit (gomod2nix.legacyPackages.${system}) buildGoApplication;
+        version = pkgs.lib.trim (builtins.readFile ./VERSION);
       in {
         packages.default = buildGoApplication {
           pname   = "gguf-manager";
-          version = "0.1.0";
+          version = version;
           src     = ./.;
           modules = ./gomod2nix.toml;
+          ldflags = [ "-s" "-w" "-X" "main.version=v${version}" ];
 
           meta = {
             description = "Local web UI for managing GGUF models with llama-server";
