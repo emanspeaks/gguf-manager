@@ -139,6 +139,26 @@ func fetchRepoInfo(repoID, token string) (*HFRepoInfo, error) {
 		}
 	}
 
+	// Non-GGUF files (imatrix.dat, README.md, etc.) are shown as optional
+	// companion sidecars. Skip only git metadata files.
+	for _, s := range model.Siblings {
+		if strings.HasSuffix(s.Rfilename, ".gguf") {
+			continue
+		}
+		if base := filepath.Base(s.Rfilename); strings.HasPrefix(base, ".git") {
+			continue
+		}
+		size := s.Size
+		if sz, ok := treeSizes[s.Rfilename]; ok {
+			size = &sz
+		}
+		info.Sidecars = append(info.Sidecars, HFFile{
+			Filename:    s.Rfilename,
+			Size:        size,
+			DownloadURL: "https://huggingface.co/" + repoID + "/resolve/main/" + s.Rfilename,
+		})
+	}
+
 	// Detect vision from companion files.
 	for _, s := range info.Sidecars {
 		if matchesMmproj(s.Filename) {
