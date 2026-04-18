@@ -148,28 +148,6 @@
     user-select: text; cursor: text;
   }
   #status-log .log-line { display: block; }
-  /* ── Disk bar ────────────────────────────────────────────────────────── */
-  .disk-info { display: flex; align-items: center; gap: 0.4rem; flex-shrink: 0; }
-  .disk-bar-track {
-    width: 72px; height: 6px; border-radius: 3px;
-    background: #1e293b; overflow: hidden;
-  }
-  .disk-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s, background 0.5s; }
-  .disk-bar-fill.ok     { background: #16a34a; }
-  .disk-bar-fill.warn   { background: #d97706; }
-  .disk-bar-fill.danger { background: #dc2626; }
-  #disk-label { font-size: 0.7rem; color: #64748b; white-space: nowrap; font-family: 'Menlo','Consolas',monospace; }
-  /* ── File row states ─────────────────────────────────────────────────── */
-  .file-row-toobig .file-name { color: #f87171; }
-  .file-row-toobig .file-size { color: #f87171; }
-  .file-row-toobig .dl-btn   { background: #7f1d1d; color: #fca5a5; }
-  /* ── Cancel button ───────────────────────────────────────────────────── */
-  #cancel-btn {
-    background: #7f1d1d; color: #fca5a5; border: none;
-    font-size: 0.68rem; padding: 2px 8px; border-radius: 4px;
-    cursor: pointer; flex-shrink: 0; display: none;
-  }
-  #cancel-btn:hover { background: #991b1b; }
 
   /* ── Light mode ──────────────────────────────────────────────────────── */
   html.light body            { background: #f8fafc; color: #0f172a; }
