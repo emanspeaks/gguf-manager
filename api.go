@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -201,6 +202,43 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Disk:               disk,
 		WarnDownloadBytes:  warnBytes,
 	})
+}
+
+func (s *server) handleReadme(w http.ResponseWriter, r *http.Request) {
+	repoID := r.URL.Query().Get("id")
+	if repoID == "" {
+		http.Error(w, "missing id parameter", http.StatusBadRequest)
+		return
+	}
+	if strings.Count(repoID, "/") != 1 || strings.Contains(repoID, "..") || strings.ContainsAny(repoID, " \t\n") {
+		http.Error(w, "invalid repo id", http.StatusBadRequest)
+		return
+	}
+	url := "https://huggingface.co/" + repoID + "/resolve/main/README.md"
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if s.cfg.HFToken != "" {
+		req.Header.Set("Authorization", "Bearer "+s.cfg.HFToken)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		http.Error(w, "failed to fetch readme: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		http.Error(w, "HuggingFace returned non-OK status", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	io.Copy(w, io.LimitReader(resp.Body, 1<<20))
 }
 
 func (s *server) handleRepo(w http.ResponseWriter, r *http.Request) {

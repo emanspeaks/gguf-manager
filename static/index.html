@@ -60,10 +60,17 @@
   #theme-toggle:hover { background: #1e293b; color: #f1f5f9; }
   /* ── Layout ──────────────────────────────────────────────────────────── */
   main {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;
-    padding: 1.25rem; max-width: 1280px; margin: 0 auto;
+    display: grid; grid-template-columns: 1fr 1fr 1.5fr; gap: 1.25rem;
+    padding: 1.25rem; max-width: 1600px; margin: 0 auto;
   }
-  @media (max-width: 768px) { main { grid-template-columns: 1fr; } }
+  @media (max-width: 1100px) {
+    main { grid-template-columns: 1fr 1fr; }
+    #readme-section { grid-column: 1 / -1; }
+  }
+  @media (max-width: 768px) {
+    main { grid-template-columns: 1fr; }
+    #readme-section { grid-column: auto; }
+  }
   section {
     background: #1e293b; border-radius: 10px; padding: 1.25rem;
     border: 1px solid #334155;
@@ -244,6 +251,50 @@
     color: #475569; user-select: text; cursor: text; word-break: break-all;
   }
   html.light .model-repo-id { color: #94a3b8; }
+  /* ── Tags row ────────────────────────────────────────────────────────────── */
+  .tags-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+  .badge-tag { background: #1e293b; color: #64748b; border: 1px solid #334155; font-weight: 400; }
+  .badge-pipeline { background: #1a2e4a; color: #93c5fd; }
+  html.light .badge-tag { background: #f1f5f9; color: #64748b; border-color: #e2e8f0; }
+  html.light .badge-pipeline { background: #dbeafe; color: #1d4ed8; }
+  /* ── Clickable model card ────────────────────────────────────────────────── */
+  .model-card.clickable { cursor: pointer; }
+  .model-card.clickable:hover { border-color: #475569; }
+  html.light .model-card.clickable:hover { border-color: #94a3b8; }
+  /* ── README panel ────────────────────────────────────────────────────────── */
+  .readme-body { overflow-y: auto; max-height: 72vh; padding-right: 4px; }
+  .readme-content { font-size: 0.82rem; line-height: 1.65; color: #cbd5e1; }
+  .readme-content h1 { font-size: 1.2rem; font-weight: 700; margin: 1rem 0 0.4rem; color: #f1f5f9; border-bottom: 1px solid #334155; padding-bottom: 0.3rem; }
+  .readme-content h2 { font-size: 1rem; font-weight: 600; margin: 1rem 0 0.35rem; color: #e2e8f0; }
+  .readme-content h3 { font-size: 0.9rem; font-weight: 600; margin: 0.75rem 0 0.3rem; color: #cbd5e1; }
+  .readme-content h4 { font-size: 0.85rem; font-weight: 600; margin: 0.6rem 0 0.2rem; color: #94a3b8; }
+  .readme-content p { margin: 0.4rem 0; }
+  .readme-content pre { background: #0f172a; border: 1px solid #334155; border-radius: 5px; padding: 0.5rem 0.75rem; overflow-x: auto; font-size: 0.75rem; margin: 0.5rem 0; }
+  .readme-content code { font-family: 'Menlo','Consolas',monospace; font-size: 0.8em; background: #0f172a; padding: 1px 4px; border-radius: 3px; color: #e2e8f0; }
+  .readme-content pre code { background: none; padding: 0; font-size: inherit; }
+  .readme-content a { color: #60a5fa; text-decoration: none; }
+  .readme-content a:hover { text-decoration: underline; }
+  .readme-content ul,.readme-content ol { padding-left: 1.4rem; margin: 0.4rem 0; }
+  .readme-content li { margin: 0.15rem 0; }
+  .readme-content table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; font-size: 0.78rem; }
+  .readme-content th,.readme-content td { border: 1px solid #334155; padding: 4px 8px; text-align: left; }
+  .readme-content th { background: #162032; color: #f1f5f9; font-weight: 600; }
+  .readme-content hr { border: none; border-top: 1px solid #334155; margin: 0.75rem 0; }
+  .readme-content blockquote { border-left: 3px solid #334155; padding-left: 0.75rem; color: #94a3b8; margin: 0.4rem 0; }
+  .readme-content strong { font-weight: 600; color: #e2e8f0; }
+  .readme-content em { font-style: italic; }
+  html.light .readme-content { color: #475569; }
+  html.light .readme-content h1 { color: #1e293b; border-bottom-color: #e2e8f0; }
+  html.light .readme-content h2,.readme-content h3 { color: #1e293b; }
+  html.light .readme-content h4 { color: #64748b; }
+  html.light .readme-content pre { background: #f8fafc; border-color: #e2e8f0; }
+  html.light .readme-content code { background: #f1f5f9; color: #1e293b; }
+  html.light .readme-content th { background: #f8fafc; color: #1e293b; }
+  html.light .readme-content th,.readme-content td { border-color: #e2e8f0; }
+  html.light .readme-content a { color: #2563eb; }
+  html.light .readme-content blockquote { border-left-color: #e2e8f0; color: #64748b; }
+  html.light .readme-content hr { border-top-color: #e2e8f0; }
+  html.light .readme-content strong { color: #1e293b; }
 </style>
 </head>
 <body>
@@ -291,6 +342,19 @@
     </div>
     <div id="repo-error" class="msg-error" style="display:none"></div>
     <div id="repo-results"></div>
+  </section>
+
+  <!-- Right panel: Model Card (README) -->
+  <section id="readme-section">
+    <div class="section-header">
+      <h2>Model Card</h2>
+      <span id="readme-repo-label" style="font-size:0.72rem;color:#64748b;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px"></span>
+    </div>
+    <div class="readme-body">
+      <div id="readme-content" class="readme-content">
+        <p class="msg-empty">Browse a repo or click a local model to view its model card.</p>
+      </div>
+    </div>
   </section>
 </main>
 
@@ -437,7 +501,7 @@ function renderLocalModels(models) {
   list.innerHTML = '';
   for (const m of models) {
     const card = document.createElement('div');
-    card.className = 'model-card';
+    card.className = 'model-card' + (m.repoId ? ' clickable' : '');
     const visionBadge = m.isVision ? ' <span class="badge badge-vision">Vision</span>' : '';
     const presetWarn = m.isVision && !m.inPreset
       ? ' <span class="badge badge-warn-preset" title="Not in managed.ini — add to preset so llama-server loads it">Preset missing</span>'
@@ -456,6 +520,13 @@ function renderLocalModels(models) {
       </div>
       <button class="btn-danger delete-btn">Delete</button>
     `;
+    if (m.repoId) {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return;
+        document.getElementById('repo-input').value = m.repoId;
+        browseRepo();
+      });
+    }
     card.querySelector('.delete-btn').addEventListener('click', () => deleteModel(m.name));
     list.appendChild(card);
   }
@@ -483,6 +554,7 @@ async function browseRepo() {
   clearErr('repo-error');
   const results = document.getElementById('repo-results');
   results.innerHTML = '<p class="msg-loading">Fetching file list…</p>';
+  fetchAndRenderReadme(repoId);
   try {
     const resp = await fetch('/api/repo?id=' + encodeURIComponent(repoId));
     if (!resp.ok) throw new Error(await resp.text());
@@ -504,10 +576,27 @@ function renderRepoInfo(repoId, info) {
   }
   results.innerHTML = '';
 
+  // Tags row
+  const tagItems = [];
+  if (info.pipelineTag) tagItems.push(`<span class="badge badge-pipeline">${esc(info.pipelineTag)}</span>`);
+  for (const t of (info.tags || [])) {
+    if (t !== info.pipelineTag) tagItems.push(`<span class="badge badge-tag">${esc(t)}</span>`);
+  }
+  if (tagItems.length) {
+    const row = document.createElement('div');
+    row.className = 'tags-row';
+    row.innerHTML = tagItems.join('');
+    results.appendChild(row);
+  }
+
   if (info.isVision) {
     const hdr = document.createElement('div');
-    hdr.style.cssText = 'padding:4px 0 8px;font-size:0.78rem;color:#7dd3fc';
-    hdr.innerHTML = '<span class="badge badge-vision">Vision model</span> &nbsp;Includes a multimodal projector (mmproj) for image understanding.';
+    hdr.style.cssText = 'padding:4px 0 8px;font-size:0.78rem;';
+    if (sidecars.length > 0) {
+      hdr.innerHTML = '<span class="badge badge-vision">Vision</span> &nbsp;<span style="color:#7dd3fc">Multimodal projector included — select companion files below.</span>';
+    } else {
+      hdr.innerHTML = '<span class="badge badge-vision">Vision</span> &nbsp;<span style="color:#fbbf24">No companion files in this repo — check the model card for the mmproj source.</span>';
+    }
     results.appendChild(hdr);
   }
 
@@ -669,6 +758,106 @@ async function restartService() {
   } finally {
     btn.disabled = false;
   }
+}
+
+// ── README ─────────────────────────────────────────────────────────────────
+
+async function fetchAndRenderReadme(repoId) {
+  const content = document.getElementById('readme-content');
+  const label = document.getElementById('readme-repo-label');
+  label.textContent = repoId;
+  content.innerHTML = '<p class="msg-loading">Loading…</p>';
+  try {
+    const resp = await fetch('/api/readme?id=' + encodeURIComponent(repoId));
+    if (resp.status === 404) {
+      content.innerHTML = '<p class="msg-empty">No README found for this repo.</p>';
+      return;
+    }
+    if (!resp.ok) throw new Error(await resp.text());
+    content.innerHTML = renderMarkdown(await resp.text());
+  } catch (e) {
+    content.innerHTML = `<p class="msg-error">Failed to load README: ${esc(e.message)}</p>`;
+  }
+}
+
+function renderMarkdown(raw) {
+  // Strip YAML frontmatter
+  let md = raw.replace(/^---[\s\S]*?\n---[ \t]*\n?/, '');
+
+  // Extract fenced code blocks (protect from further processing)
+  const fenced = [];
+  md = md.replace(/^```([\w.-]*)\n([\s\S]*?)^```[ \t]*$/gm, (_, lang, code) => {
+    fenced.push(`<pre><code>${esc(code)}</code></pre>`);
+    return '\x00F' + (fenced.length - 1) + '\x00';
+  });
+
+  // Extract inline code
+  const icodes = [];
+  md = md.replace(/`([^`\n]+)`/g, (_, c) => {
+    icodes.push(`<code>${esc(c)}</code>`);
+    return '\x00C' + (icodes.length - 1) + '\x00';
+  });
+
+  // Tables
+  md = md.replace(/((?:[ \t]*\|.+\n)+)/g, block => {
+    const rows = block.trim().split('\n')
+      .filter(r => !/^[ \t]*\|[\s\-:|]+\|[ \t]*$/.test(r));
+    if (!rows.length) return block;
+    let html = '<table>';
+    rows.forEach((row, i) => {
+      const cells = row.replace(/^[ \t]*\|/, '').replace(/\|[ \t]*$/, '').split('|');
+      const tag = i === 0 ? 'th' : 'td';
+      html += '<tr>' + cells.map(c => `<${tag}>${inlineMd(c.trim())}</${tag}>`).join('') + '</tr>';
+    });
+    return html + '</table>\n\n';
+  });
+
+  // Headers
+  md = md.replace(/^(#{1,4}) (.+)$/gm, (_, h, t) => `<h${h.length}>${inlineMd(t.trim())}</h${h.length}>\n`);
+
+  // Horizontal rules
+  md = md.replace(/^[ \t]*[-*_]{3,}[ \t]*$/gm, '<hr>');
+
+  // Blockquotes (single line)
+  md = md.replace(/^> ?(.+)$/gm, (_, t) => `<blockquote>${inlineMd(t)}</blockquote>`);
+
+  // Unordered lists
+  md = md.replace(/((?:^[ \t]*[-*+] .+(?:\n|$))+)/gm, block => {
+    const items = block.trim().split('\n')
+      .map(l => `<li>${inlineMd(l.replace(/^[ \t]*[-*+] /, ''))}</li>`).join('');
+    return `<ul>${items}</ul>\n\n`;
+  });
+
+  // Ordered lists
+  md = md.replace(/((?:^[ \t]*\d+\. .+(?:\n|$))+)/gm, block => {
+    const items = block.trim().split('\n')
+      .map(l => `<li>${inlineMd(l.replace(/^[ \t]*\d+\. /, ''))}</li>`).join('');
+    return `<ol>${items}</ol>\n\n`;
+  });
+
+  // Paragraphs: wrap leftover text runs between blank lines
+  md = md.split(/\n{2,}/).map(chunk => {
+    chunk = chunk.trim();
+    if (!chunk) return '';
+    if (/^(<h\d|<ul|<ol|<table|<pre|<hr|<blockquote|\x00F)/.test(chunk)) return chunk;
+    return `<p>${inlineMd(chunk.replace(/\n/g, ' '))}</p>`;
+  }).join('\n');
+
+  // Restore placeholders
+  md = md.replace(/\x00F(\d+)\x00/g, (_, i) => fenced[+i]);
+  md = md.replace(/\x00C(\d+)\x00/g, (_, i) => icodes[+i]);
+  return md;
+}
+
+function inlineMd(text) {
+  text = esc(text);
+  text = text.replace(/\*\*\*([^*\n]+)\*\*\*/g, '<strong><em>$1</em></strong>');
+  text = text.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  text = text.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+  text = text.replace(/!\[[^\]]*\]\([^)]+\)/g, ''); // strip images (relative paths break)
+  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  return text;
 }
 
 // ── Status polling ─────────────────────────────────────────────────────────

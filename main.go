@@ -50,6 +50,7 @@ func main() {
 	mux.Handle("GET /", http.FileServer(http.FS(staticFS)))
 	mux.HandleFunc("GET /api/local", srv.handleLocal)
 	mux.HandleFunc("GET /api/repo", srv.handleRepo)
+	mux.HandleFunc("GET /api/readme", srv.handleReadme)
 	mux.HandleFunc("POST /api/download", srv.handleDownload)
 	mux.HandleFunc("POST /api/download/cancel", srv.handleCancelDownload)
 	mux.HandleFunc("GET /api/download/status", srv.handleDownloadStatus)

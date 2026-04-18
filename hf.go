@@ -14,9 +14,11 @@ type HFFile struct {
 }
 
 type HFRepoInfo struct {
-	IsVision bool     `json:"isVision"`
-	Models   []HFFile `json:"models"`
-	Sidecars []HFFile `json:"sidecars"`
+	IsVision    bool     `json:"isVision"`
+	Models      []HFFile `json:"models"`
+	Sidecars    []HFFile `json:"sidecars"`
+	PipelineTag string   `json:"pipelineTag,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
 }
 
 type hfModelResponse struct {
@@ -24,6 +26,8 @@ type hfModelResponse struct {
 		Rfilename string `json:"rfilename"`
 		Size      *int64 `json:"size"`
 	} `json:"siblings"`
+	PipelineTag string   `json:"pipeline_tag"`
+	Tags        []string `json:"tags"`
 }
 
 func fetchRepoInfo(repoID, token string) (*HFRepoInfo, error) {
@@ -47,7 +51,10 @@ func fetchRepoInfo(repoID, token string) (*HFRepoInfo, error) {
 		return nil, err
 	}
 
-	info := &HFRepoInfo{}
+	info := &HFRepoInfo{
+		PipelineTag: model.PipelineTag,
+		Tags:        model.Tags,
+	}
 	for _, s := range model.Siblings {
 		if !strings.HasSuffix(s.Rfilename, ".gguf") {
 			continue
@@ -63,10 +70,24 @@ func fetchRepoInfo(repoID, token string) (*HFRepoInfo, error) {
 			info.Models = append(info.Models, f)
 		}
 	}
+	// Detect vision from companion files.
 	for _, s := range info.Sidecars {
 		if matchesMmproj(s.Filename) {
 			info.IsVision = true
 			break
+		}
+	}
+	// Also detect vision from model metadata tags when no mmproj file is present.
+	if !info.IsVision {
+		if model.PipelineTag == "image-text-to-text" {
+			info.IsVision = true
+		} else {
+			for _, t := range model.Tags {
+				switch strings.ToLower(t) {
+				case "vision", "multimodal", "image-text-to-text":
+					info.IsVision = true
+				}
+			}
 		}
 	}
 	return info, nil
