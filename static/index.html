@@ -328,6 +328,7 @@
   .readme-content blockquote { border-left: 3px solid #334155; padding-left: 0.75rem; color: #94a3b8; margin: 0.4rem 0; }
   .readme-content strong { font-weight: 600; color: #e2e8f0; }
   .readme-content em { font-style: italic; }
+  .readme-content img { max-width: 100%; height: auto; display: block; }
   html.light .readme-content { color: #475569; }
   html.light .readme-content h1 { color: #1e293b; border-bottom-color: #e2e8f0; }
   html.light .readme-content h2,.readme-content h3 { color: #1e293b; }
@@ -696,7 +697,7 @@ function renderRepoInfo(repoId, info) {
     // Group files by bit-depth for the grid rows.
     const byBit = new Map();
     for (const f of files) {
-      const label = quantDisplayName(f.filename, prefix);
+      const label = f.displayName || quantDisplayName(f.filename, prefix);
       const bits  = quantBitDepth(label);
       if (!byBit.has(bits)) byBit.set(bits, []);
       byBit.get(bits).push({ f, label });
