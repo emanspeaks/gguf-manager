@@ -44,15 +44,16 @@ func getDiskInfo(path string) (diskInfo, error) {
 }
 
 type localModel struct {
-	Name        string   `json:"name"`
-	Path        string   `json:"path"`
-	SizeBytes   int64    `json:"sizeBytes"`
-	Files       []string `json:"files"`
-	Loaded      bool     `json:"loaded"`
-	IsVision    bool     `json:"isVision"`
-	Mmproj      string   `json:"mmproj"`
-	InPreset    bool     `json:"inPreset"`
+	Name        string            `json:"name"`
+	Path        string            `json:"path"`
+	SizeBytes   int64             `json:"sizeBytes"`
+	Files       []string          `json:"files"`
+	Loaded      bool              `json:"loaded"`
+	IsVision    bool              `json:"isVision"`
+	Mmproj      string            `json:"mmproj"`
+	InPreset    bool              `json:"inPreset"`
 	PresetEntry map[string]string `json:"presetEntry,omitempty"`
+	RepoID      string            `json:"repoId,omitempty"`
 }
 
 func (s *server) handleLocal(w http.ResponseWriter, r *http.Request) {
@@ -119,6 +120,7 @@ func (s *server) handleLocal(w http.ResponseWriter, r *http.Request) {
 			Mmproj:      mmprojName,
 			InPreset:    inPreset,
 			PresetEntry: presetEntry,
+			RepoID:      readModelMeta(modelDir).RepoID,
 		})
 	}
 	writeJSON(w, models)
@@ -217,9 +219,10 @@ func (s *server) handleRepo(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		RepoID      string `json:"repoId"`
-		Filename    string `json:"filename"`
-		MmprojFile  string `json:"mmprojFile"`
+		RepoID     string `json:"repoId"`
+		Filename   string `json:"filename"`
+		MmprojFile string `json:"mmprojFile"`
+		Force      bool   `json:"force"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -229,7 +232,26 @@ func (s *server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "repoId and filename are required", http.StatusBadRequest)
 		return
 	}
-	if err := s.dl.start(req.RepoID, req.Filename, req.MmprojFile); err != nil {
+
+	if !req.Force {
+		modelName := modelNameFromFilename(req.Filename)
+		if modelName != "" {
+			destDir := filepath.Join(s.cfg.ModelsDir, modelName)
+			if _, err := os.Stat(destDir); err == nil {
+				existingRepoID := readModelMeta(destDir).RepoID
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				json.NewEncoder(w).Encode(map[string]string{
+					"conflict":       "exists",
+					"modelName":      modelName,
+					"existingRepoId": existingRepoID,
+				})
+				return
+			}
+		}
+	}
+
+	if err := s.dl.start(req.RepoID, req.Filename, req.MmprojFile, req.Force); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}

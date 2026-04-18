@@ -24,17 +24,33 @@
     font-size: 0.7rem; color: #475569;
     font-family: 'Menlo', 'Consolas', monospace;
   }
-  #status-indicator { font-size: 0.78rem; padding: 3px 10px; border-radius: 12px; }
+  /* ── Status pill + dropdown ──────────────────────────────────────────────── */
+  .status-pill-wrap { position: relative; flex-shrink: 0; }
+  #status-indicator {
+    font-size: 0.78rem; padding: 3px 10px; border-radius: 12px;
+    cursor: pointer; user-select: none; display: block;
+  }
+  #status-indicator:hover { filter: brightness(1.1); }
   .status-online  { background: #14532d; color: #86efac; }
   .status-offline { background: #7f1d1d; color: #fca5a5; }
   .status-unknown { background: #1e293b; color: #94a3b8; }
-  .btn-restart {
-    background: transparent; border: 1px solid #334155; color: #94a3b8;
-    font-size: 0.75rem; padding: 4px 10px; border-radius: 5px;
-    cursor: pointer; transition: background 0.15s, color 0.15s; white-space: nowrap;
+  .status-menu {
+    display: none; position: absolute; top: calc(100% + 6px); right: 0;
+    background: #1e293b; border: 1px solid #334155; border-radius: 7px;
+    min-width: 160px; z-index: 200; box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    overflow: hidden;
   }
-  .btn-restart:hover:not(:disabled) { background: #1e293b; color: #f1f5f9; }
-  .btn-restart:disabled { opacity: 0.45; cursor: not-allowed; }
+  .status-menu.open { display: block; }
+  .status-menu button {
+    display: block; width: 100%; text-align: left;
+    background: transparent; border: none; border-radius: 0;
+    color: #cbd5e1; font-size: 0.825rem; font-weight: 400;
+    padding: 8px 14px; cursor: pointer; transition: background 0.12s;
+  }
+  .status-menu button:hover { background: #334155; color: #f1f5f9; }
+  html.light .status-menu { background: #fff; border-color: #e2e8f0; box-shadow: 0 4px 16px rgba(0,0,0,0.1); }
+  html.light .status-menu button { color: #475569; }
+  html.light .status-menu button:hover { background: #f1f5f9; color: #0f172a; }
   #theme-toggle {
     background: transparent; border: 1px solid #334155; color: #94a3b8;
     font-size: 0.85rem; padding: 4px 8px; border-radius: 5px;
@@ -155,8 +171,6 @@
   html.light #app-version    { color: #94a3b8; }
   html.light #theme-toggle   { border-color: #cbd5e1; color: #475569; }
   html.light #theme-toggle:hover { background: #e2e8f0; color: #0f172a; }
-  html.light .btn-restart    { border-color: #cbd5e1; color: #475569; }
-  html.light .btn-restart:hover:not(:disabled) { background: #e2e8f0; color: #0f172a; }
   html.light section         { background: #ffffff; border-color: #e2e8f0; }
   html.light .section-header h2 { color: #1e293b; }
   html.light .btn-secondary  { background: #e2e8f0; color: #475569; }
@@ -223,6 +237,12 @@
     white-space: nowrap; flex-shrink: 0;
   }
   #cancel-dl-btn:hover { background: #991b1b; }
+  /* ── Repo ID in model card ───────────────────────────────────────────────── */
+  .model-repo-id {
+    font-size: 0.72rem; font-family: 'Menlo', 'Consolas', monospace;
+    color: #475569; user-select: text; cursor: text; word-break: break-all;
+  }
+  html.light .model-repo-id { color: #94a3b8; }
 </style>
 </head>
 <body>
@@ -231,13 +251,17 @@
     <h1>gguf-manager</h1>
     <span id="app-version"></span>
   </div>
-  <span id="status-indicator" class="status-unknown">connecting…</span>
   <div class="disk-bar-wrap" id="disk-info" style="display:none">
     <div class="disk-bar"><div class="disk-bar-fill ok" id="disk-bar-fill" style="width:0%"></div></div>
     <span id="disk-text"></span>
   </div>
+  <div class="status-pill-wrap">
+    <span id="status-indicator" class="status-unknown" title="Click for options">connecting…</span>
+    <div class="status-menu" id="status-menu">
+      <button id="restart-btn">Restart Service</button>
+    </div>
+  </div>
   <button id="theme-toggle" title="Toggle light/dark mode">☀</button>
-  <button class="btn-restart" id="restart-btn">Restart Service</button>
 </header>
 <main>
   <!-- Left panel: Local Models -->
@@ -417,9 +441,13 @@ function renderLocalModels(models) {
     const presetWarn = m.isVision && !m.inPreset
       ? ' <span class="badge badge-warn-preset" title="Not in managed.ini — add to preset so llama-server loads it">Preset missing</span>'
       : '';
+    const repoLine = m.repoId
+      ? `<span class="model-repo-id">${esc(m.repoId)}</span>`
+      : '';
     card.innerHTML = `
       <div class="model-meta">
         <span class="model-name">${esc(m.name)}${visionBadge}${presetWarn}</span>
+        ${repoLine}
         <span class="model-detail">
           ${esc(formatBytes(m.sizeBytes))} &middot; ${m.files.length} file${m.files.length !== 1 ? 's' : ''}
           &nbsp;<span class="badge ${m.loaded ? 'badge-loaded' : 'badge-unloaded'}">${m.loaded ? 'Loaded' : 'Unloaded'}</span>
@@ -525,23 +553,39 @@ function renderRepoInfo(repoId, info) {
 
 // ── Download ───────────────────────────────────────────────────────────────
 
-async function startDownload(repoId, filename, mmprojFile, totalSize) {
+async function startDownload(repoId, filename, mmprojFile, totalSize, force) {
   if (downloadInProgress) return;
   if (warnDownloadBytes > 0 && totalSize != null && totalSize > warnDownloadBytes) {
     const gb = (totalSize / 1073741824).toFixed(2);
     if (!confirm(`This download is ${gb} GB. Continue?`)) return;
   }
+  const body = { repoId, filename };
+  if (mmprojFile) body.mmprojFile = mmprojFile;
+  if (force) body.force = true;
+  let resp;
   try {
-    const body = { repoId, filename };
-    if (mmprojFile) body.mmprojFile = mmprojFile;
-    const resp = await fetch('/api/download', {
+    resp = await fetch('/api/download', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!resp.ok) throw new Error(await resp.text());
   } catch (e) {
     setStatusBar('Error', 'Failed to start download: ' + e.message, false);
+    return;
+  }
+  if (resp.status === 409) {
+    let conflict;
+    try { conflict = await resp.json(); } catch (_) { conflict = {}; }
+    if (conflict.conflict === 'exists') {
+      const repoLine = conflict.existingRepoId ? `\nOriginally from: ${conflict.existingRepoId}` : '';
+      if (!confirm(`Model "${conflict.modelName}" already exists.${repoLine}\n\nReplace it with a fresh download?`)) return;
+      return startDownload(repoId, filename, mmprojFile, totalSize, true);
+    }
+    setStatusBar('Error', 'Download conflict: ' + (conflict.message || resp.statusText), false);
+    return;
+  }
+  if (!resp.ok) {
+    setStatusBar('Error', 'Failed to start download: ' + (await resp.text()), false);
     return;
   }
   setDownloadState(true);
@@ -594,9 +638,24 @@ function setDownloadState(inProgress) {
   document.getElementById('cancel-dl-btn').style.display = inProgress ? 'inline-block' : 'none';
 }
 
+// ── Status pill menu ───────────────────────────────────────────────────────
+
+function toggleStatusMenu(e) {
+  e.stopPropagation();
+  document.getElementById('status-menu').classList.toggle('open');
+}
+
+document.addEventListener('click', () => {
+  document.getElementById('status-menu').classList.remove('open');
+});
+
+document.getElementById('status-indicator').addEventListener('click', toggleStatusMenu);
+
 // ── Restart service ────────────────────────────────────────────────────────
 
 async function restartService() {
+  document.getElementById('status-menu').classList.remove('open');
+  if (!confirm('Restart llama-server service?\n\nThe server will be briefly unavailable.')) return;
   const btn = document.getElementById('restart-btn');
   btn.disabled = true;
   setStatusBar('Restart', 'Restarting llama-server…', true);
@@ -648,6 +707,7 @@ document.getElementById('refresh-btn').addEventListener('click', fetchLocalModel
 document.getElementById('browse-btn').addEventListener('click', browseRepo);
 document.getElementById('restart-btn').addEventListener('click', restartService);
 document.getElementById('cancel-dl-btn').addEventListener('click', cancelDownload);
+document.getElementById('status-menu').addEventListener('click', (e) => e.stopPropagation());
 document.getElementById('repo-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') browseRepo();
 });
