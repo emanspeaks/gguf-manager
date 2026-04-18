@@ -174,7 +174,7 @@ func (s *server) handleDeleteLocal(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "model not found", http.StatusNotFound)
 		return
 	}
-	if err := os.RemoveAll(modelDir); err != nil {
+	if err := removeAllWritable(modelDir); err != nil {
 		http.Error(w, "failed to delete: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

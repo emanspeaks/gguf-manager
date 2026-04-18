@@ -80,6 +80,26 @@ type downloader struct {
 	progress   *progressInfo
 }
 
+// removeAllWritable chmod-walks path to make every entry owner-writable before
+// calling os.RemoveAll. This is necessary because hf download writes files and
+// dirs with restrictive permissions (e.g. 0555 dirs, 0444 files) that would
+// cause os.RemoveAll to fail with "permission denied" even when the process
+// owns the tree.
+func removeAllWritable(path string) error {
+	filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			os.Chmod(p, 0755)
+		} else {
+			os.Chmod(p, 0644)
+		}
+		return nil
+	})
+	return os.RemoveAll(path)
+}
+
 // dirSize returns the total size of all regular files under path.
 func dirSize(path string) int64 {
 	var total int64
@@ -204,7 +224,7 @@ func (d *downloader) start(repoID string, filenames []string, sidecarFiles []str
 		// if the new download fails.
 		oldDir = destDir + ".old"
 		// Remove any stale .old from a previous failed redownload.
-		_ = os.RemoveAll(oldDir)
+		_ = removeAllWritable(oldDir)
 		if err := os.Rename(destDir, oldDir); err != nil {
 			return fmt.Errorf("could not move existing model: %w", err)
 		}
@@ -394,7 +414,7 @@ func (d *downloader) run(ctx context.Context, repoID string, patterns []string, 
 		d.appendLine(fmt.Sprintf("[w84ggufman] warning: could not write metadata: %v", err))
 	}
 	if oldDir != "" {
-		if err := os.RemoveAll(oldDir); err != nil {
+		if err := removeAllWritable(oldDir); err != nil {
 			d.appendLine(fmt.Sprintf("[w84ggufman] warning: could not remove old model: %v", err))
 		}
 	}
@@ -434,7 +454,7 @@ func (d *downloader) restoreOnFailure(oldDir, destDir string) {
 	if oldDir == "" {
 		return
 	}
-	_ = os.RemoveAll(destDir)
+	_ = removeAllWritable(destDir)
 	if err := os.Rename(oldDir, destDir); err != nil {
 		d.appendLine(fmt.Sprintf("[w84ggufman] warning: could not restore old model: %v", err))
 	} else {
