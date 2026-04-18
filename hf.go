@@ -133,12 +133,14 @@ func fetchRepoInfo(repoID, token string) (*HFRepoInfo, error) {
 // filename → actual byte size. For LFS files it uses lfs.size; for regular
 // files it uses size. Returns an empty map on any error so callers can fall
 // back gracefully.
+//
+// Uses recursive=true so subdirectory files are included in one shot, then
+// follows RFC 5988 Link: <url>; rel="next" headers for any additional pages.
 func fetchTreeSizes(repoID, token string) map[string]int64 {
 	sizes := make(map[string]int64)
-	base := "https://huggingface.co/api/models/" + repoID + "/tree/main"
-	for page := 0; ; page++ {
-		url := fmt.Sprintf("%s?p=%d&expand=true", base, page)
-		req, err := http.NewRequest("GET", url, nil)
+	next := "https://huggingface.co/api/models/" + repoID + "/tree/main?recursive=true"
+	for next != "" {
+		req, err := http.NewRequest("GET", next, nil)
 		if err != nil {
 			break
 		}
@@ -151,6 +153,7 @@ func fetchTreeSizes(repoID, token string) map[string]int64 {
 		}
 		var entries []hfTreeEntry
 		err = json.NewDecoder(resp.Body).Decode(&entries)
+		next = parseLinkNext(resp.Header.Get("Link"))
 		resp.Body.Close()
 		if err != nil || resp.StatusCode != http.StatusOK {
 			break
@@ -165,11 +168,24 @@ func fetchTreeSizes(repoID, token string) map[string]int64 {
 				sizes[e.Path] = *e.Size
 			}
 		}
-		if len(entries) == 0 {
-			break
-		}
 	}
 	return sizes
+}
+
+// parseLinkNext extracts the URL for rel="next" from an RFC 5988 Link header.
+func parseLinkNext(link string) string {
+	for _, seg := range strings.Split(link, ",") {
+		seg = strings.TrimSpace(seg)
+		if !strings.Contains(seg, `rel="next"`) {
+			continue
+		}
+		s := strings.Index(seg, "<")
+		e := strings.Index(seg, ">")
+		if s >= 0 && e > s {
+			return seg[s+1 : e]
+		}
+	}
+	return ""
 }
 
 func matchesMmproj(filename string) bool {
