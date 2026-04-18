@@ -41,11 +41,10 @@ type hfTreeEntry struct {
 	} `json:"lfs"`
 }
 
-// hasQuantRe matches a GGUF filename that ends with a recognisable
-// quantisation suffix (e.g. -Q4_K_M, -UD-IQ2_XXS, -BF16). Any GGUF that
-// matches (and isn't an mmproj file) is a primary model choice; anything
-// without a quant suffix (e.g. imatrix.gguf) becomes a companion sidecar.
-var hasQuantRe = regexp.MustCompile(`(?i)[-_](?:IQ\d+_\w+|TQ\d+_\w+|Q\d+[\w_]*|MXFP\d+\w*|NVFP\d+|BF16|F16|F32)\.gguf$`)
+// hasQuantRe matches a GGUF filename ending with a known quant family prefix
+// (longest-first: IQ, TQ, BF, MXFP, NVFP, then single-char Q/F) followed by
+// digits. Handles UD-* variant filenames transparently.
+var hasQuantRe = regexp.MustCompile(`(?i)[-_](?:UD-)?(?:IQ|TQ|BF|MXFP|NVFP|[QF])\d+\w*\.gguf$`)
 
 func fetchRepoInfo(repoID, token string) (*HFRepoInfo, error) {
 	req, err := http.NewRequest("GET", "https://huggingface.co/api/models/"+repoID, nil)
