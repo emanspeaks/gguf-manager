@@ -24,17 +24,33 @@
     font-size: 0.7rem; color: #475569;
     font-family: 'Menlo', 'Consolas', monospace;
   }
-  #status-indicator { font-size: 0.78rem; padding: 3px 10px; border-radius: 12px; }
+  /* ── Status pill + dropdown ──────────────────────────────────────────────── */
+  .status-pill-wrap { position: relative; flex-shrink: 0; }
+  #status-indicator {
+    font-size: 0.78rem; padding: 3px 10px; border-radius: 12px;
+    cursor: pointer; user-select: none; display: block;
+  }
+  #status-indicator:hover { filter: brightness(1.1); }
   .status-online  { background: #14532d; color: #86efac; }
   .status-offline { background: #7f1d1d; color: #fca5a5; }
   .status-unknown { background: #1e293b; color: #94a3b8; }
-  .btn-restart {
-    background: transparent; border: 1px solid #334155; color: #94a3b8;
-    font-size: 0.75rem; padding: 4px 10px; border-radius: 5px;
-    cursor: pointer; transition: background 0.15s, color 0.15s; white-space: nowrap;
+  .status-menu {
+    display: none; position: absolute; top: calc(100% + 6px); right: 0;
+    background: #1e293b; border: 1px solid #334155; border-radius: 7px;
+    min-width: 160px; z-index: 200; box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    overflow: hidden;
   }
-  .btn-restart:hover:not(:disabled) { background: #1e293b; color: #f1f5f9; }
-  .btn-restart:disabled { opacity: 0.45; cursor: not-allowed; }
+  .status-menu.open { display: block; }
+  .status-menu button {
+    display: block; width: 100%; text-align: left;
+    background: transparent; border: none; border-radius: 0;
+    color: #cbd5e1; font-size: 0.825rem; font-weight: 400;
+    padding: 8px 14px; cursor: pointer; transition: background 0.12s;
+  }
+  .status-menu button:hover { background: #334155; color: #f1f5f9; }
+  html.light .status-menu { background: #fff; border-color: #e2e8f0; box-shadow: 0 4px 16px rgba(0,0,0,0.1); }
+  html.light .status-menu button { color: #475569; }
+  html.light .status-menu button:hover { background: #f1f5f9; color: #0f172a; }
   #theme-toggle {
     background: transparent; border: 1px solid #334155; color: #94a3b8;
     font-size: 0.85rem; padding: 4px 8px; border-radius: 5px;
@@ -44,10 +60,17 @@
   #theme-toggle:hover { background: #1e293b; color: #f1f5f9; }
   /* ── Layout ──────────────────────────────────────────────────────────── */
   main {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;
-    padding: 1.25rem; max-width: 1280px; margin: 0 auto;
+    display: grid; grid-template-columns: 1fr 1fr 1.5fr; gap: 1.25rem;
+    padding: 1.25rem; max-width: 1600px; margin: 0 auto;
   }
-  @media (max-width: 768px) { main { grid-template-columns: 1fr; } }
+  @media (max-width: 1100px) {
+    main { grid-template-columns: 1fr 1fr; }
+    #readme-section { grid-column: 1 / -1; }
+  }
+  @media (max-width: 768px) {
+    main { grid-template-columns: 1fr; }
+    #readme-section { grid-column: auto; }
+  }
   section {
     background: #1e293b; border-radius: 10px; padding: 1.25rem;
     border: 1px solid #334155;
@@ -155,8 +178,6 @@
   html.light #app-version    { color: #94a3b8; }
   html.light #theme-toggle   { border-color: #cbd5e1; color: #475569; }
   html.light #theme-toggle:hover { background: #e2e8f0; color: #0f172a; }
-  html.light .btn-restart    { border-color: #cbd5e1; color: #475569; }
-  html.light .btn-restart:hover:not(:disabled) { background: #e2e8f0; color: #0f172a; }
   html.light section         { background: #ffffff; border-color: #e2e8f0; }
   html.light .section-header h2 { color: #1e293b; }
   html.light .btn-secondary  { background: #e2e8f0; color: #475569; }
@@ -206,16 +227,17 @@
   .file-row-toobig .file-size { color: #f87171; }
   html.light .file-row-toobig .file-name,
   html.light .file-row-toobig .file-size { color: #dc2626; }
-  /* ── Mmproj selector ─────────────────────────────────────────────────────── */
+  /* ── Sidecar checkboxes ──────────────────────────────────────────────────── */
   .file-row-inner { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
-  .vision-select-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-  .vision-select-row label { font-size: 0.7rem; color: #64748b; white-space: nowrap; }
-  select.mmproj-select {
-    font-size: 0.75rem; padding: 3px 6px;
-    background: #0f172a; border: 1px solid #334155; border-radius: 4px;
-    color: #f1f5f9; outline: none; max-width: 280px;
-  }
-  html.light select.mmproj-select { background: #fff; border-color: #cbd5e1; color: #0f172a; }
+  .sidecars-wrap { display: flex; flex-direction: column; gap: 3px; padding-top: 4px; }
+  .sidecars-label { font-size: 0.7rem; color: #475569; }
+  .sidecar-row { display: flex; align-items: center; gap: 5px; }
+  .sidecar-row input[type="checkbox"] { flex-shrink: 0; accent-color: #3b82f6; cursor: pointer; }
+  .sidecar-name { font-size: 0.75rem; font-family: monospace; color: #94a3b8; word-break: break-all; }
+  .sidecar-size { font-size: 0.7rem; color: #475569; white-space: nowrap; }
+  html.light .sidecars-label { color: #94a3b8; }
+  html.light .sidecar-name { color: #475569; }
+  html.light .sidecar-size { color: #94a3b8; }
   /* ── Cancel button ───────────────────────────────────────────────────────── */
   #cancel-dl-btn {
     display: none; font-size: 0.7rem; padding: 2px 8px; border-radius: 4px;
@@ -223,6 +245,56 @@
     white-space: nowrap; flex-shrink: 0;
   }
   #cancel-dl-btn:hover { background: #991b1b; }
+  /* ── Repo ID in model card ───────────────────────────────────────────────── */
+  .model-repo-id {
+    font-size: 0.72rem; font-family: 'Menlo', 'Consolas', monospace;
+    color: #475569; user-select: text; cursor: text; word-break: break-all;
+  }
+  html.light .model-repo-id { color: #94a3b8; }
+  /* ── Tags row ────────────────────────────────────────────────────────────── */
+  .tags-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+  .badge-tag { background: #1e293b; color: #64748b; border: 1px solid #334155; font-weight: 400; }
+  .badge-pipeline { background: #1a2e4a; color: #93c5fd; }
+  html.light .badge-tag { background: #f1f5f9; color: #64748b; border-color: #e2e8f0; }
+  html.light .badge-pipeline { background: #dbeafe; color: #1d4ed8; }
+  /* ── Clickable model card ────────────────────────────────────────────────── */
+  .model-card.clickable { cursor: pointer; }
+  .model-card.clickable:hover { border-color: #475569; }
+  html.light .model-card.clickable:hover { border-color: #94a3b8; }
+  /* ── README panel ────────────────────────────────────────────────────────── */
+  .readme-body { overflow-y: auto; max-height: 72vh; padding-right: 4px; }
+  .readme-content { font-size: 0.82rem; line-height: 1.65; color: #cbd5e1; }
+  .readme-content h1 { font-size: 1.2rem; font-weight: 700; margin: 1rem 0 0.4rem; color: #f1f5f9; border-bottom: 1px solid #334155; padding-bottom: 0.3rem; }
+  .readme-content h2 { font-size: 1rem; font-weight: 600; margin: 1rem 0 0.35rem; color: #e2e8f0; }
+  .readme-content h3 { font-size: 0.9rem; font-weight: 600; margin: 0.75rem 0 0.3rem; color: #cbd5e1; }
+  .readme-content h4 { font-size: 0.85rem; font-weight: 600; margin: 0.6rem 0 0.2rem; color: #94a3b8; }
+  .readme-content p { margin: 0.4rem 0; }
+  .readme-content pre { background: #0f172a; border: 1px solid #334155; border-radius: 5px; padding: 0.5rem 0.75rem; overflow-x: auto; font-size: 0.75rem; margin: 0.5rem 0; }
+  .readme-content code { font-family: 'Menlo','Consolas',monospace; font-size: 0.8em; background: #0f172a; padding: 1px 4px; border-radius: 3px; color: #e2e8f0; }
+  .readme-content pre code { background: none; padding: 0; font-size: inherit; }
+  .readme-content a { color: #60a5fa; text-decoration: none; }
+  .readme-content a:hover { text-decoration: underline; }
+  .readme-content ul,.readme-content ol { padding-left: 1.4rem; margin: 0.4rem 0; }
+  .readme-content li { margin: 0.15rem 0; }
+  .readme-content table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; font-size: 0.78rem; }
+  .readme-content th,.readme-content td { border: 1px solid #334155; padding: 4px 8px; text-align: left; }
+  .readme-content th { background: #162032; color: #f1f5f9; font-weight: 600; }
+  .readme-content hr { border: none; border-top: 1px solid #334155; margin: 0.75rem 0; }
+  .readme-content blockquote { border-left: 3px solid #334155; padding-left: 0.75rem; color: #94a3b8; margin: 0.4rem 0; }
+  .readme-content strong { font-weight: 600; color: #e2e8f0; }
+  .readme-content em { font-style: italic; }
+  html.light .readme-content { color: #475569; }
+  html.light .readme-content h1 { color: #1e293b; border-bottom-color: #e2e8f0; }
+  html.light .readme-content h2,.readme-content h3 { color: #1e293b; }
+  html.light .readme-content h4 { color: #64748b; }
+  html.light .readme-content pre { background: #f8fafc; border-color: #e2e8f0; }
+  html.light .readme-content code { background: #f1f5f9; color: #1e293b; }
+  html.light .readme-content th { background: #f8fafc; color: #1e293b; }
+  html.light .readme-content th,.readme-content td { border-color: #e2e8f0; }
+  html.light .readme-content a { color: #2563eb; }
+  html.light .readme-content blockquote { border-left-color: #e2e8f0; color: #64748b; }
+  html.light .readme-content hr { border-top-color: #e2e8f0; }
+  html.light .readme-content strong { color: #1e293b; }
 </style>
 </head>
 <body>
@@ -231,13 +303,17 @@
     <h1>gguf-manager</h1>
     <span id="app-version"></span>
   </div>
-  <span id="status-indicator" class="status-unknown">connecting…</span>
   <div class="disk-bar-wrap" id="disk-info" style="display:none">
     <div class="disk-bar"><div class="disk-bar-fill ok" id="disk-bar-fill" style="width:0%"></div></div>
     <span id="disk-text"></span>
   </div>
+  <div class="status-pill-wrap">
+    <span id="status-indicator" class="status-unknown" title="Click for options">connecting…</span>
+    <div class="status-menu" id="status-menu">
+      <button id="restart-btn">Restart Service</button>
+    </div>
+  </div>
   <button id="theme-toggle" title="Toggle light/dark mode">☀</button>
-  <button class="btn-restart" id="restart-btn">Restart Service</button>
 </header>
 <main>
   <!-- Left panel: Local Models -->
@@ -266,6 +342,19 @@
     </div>
     <div id="repo-error" class="msg-error" style="display:none"></div>
     <div id="repo-results"></div>
+  </section>
+
+  <!-- Right panel: Model Card (README) -->
+  <section id="readme-section">
+    <div class="section-header">
+      <h2>Model Card</h2>
+      <span id="readme-repo-label" style="font-size:0.72rem;color:#64748b;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px"></span>
+    </div>
+    <div class="readme-body">
+      <div id="readme-content" class="readme-content">
+        <p class="msg-empty">Browse a repo or click a local model to view its model card.</p>
+      </div>
+    </div>
   </section>
 </main>
 
@@ -412,14 +501,18 @@ function renderLocalModels(models) {
   list.innerHTML = '';
   for (const m of models) {
     const card = document.createElement('div');
-    card.className = 'model-card';
+    card.className = 'model-card' + (m.repoId ? ' clickable' : '');
     const visionBadge = m.isVision ? ' <span class="badge badge-vision">Vision</span>' : '';
     const presetWarn = m.isVision && !m.inPreset
       ? ' <span class="badge badge-warn-preset" title="Not in managed.ini — add to preset so llama-server loads it">Preset missing</span>'
       : '';
+    const repoLine = m.repoId
+      ? `<span class="model-repo-id">${esc(m.repoId)}</span>`
+      : '';
     card.innerHTML = `
       <div class="model-meta">
         <span class="model-name">${esc(m.name)}${visionBadge}${presetWarn}</span>
+        ${repoLine}
         <span class="model-detail">
           ${esc(formatBytes(m.sizeBytes))} &middot; ${m.files.length} file${m.files.length !== 1 ? 's' : ''}
           &nbsp;<span class="badge ${m.loaded ? 'badge-loaded' : 'badge-unloaded'}">${m.loaded ? 'Loaded' : 'Unloaded'}</span>
@@ -427,6 +520,13 @@ function renderLocalModels(models) {
       </div>
       <button class="btn-danger delete-btn">Delete</button>
     `;
+    if (m.repoId) {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return;
+        document.getElementById('repo-input').value = m.repoId;
+        browseRepo();
+      });
+    }
     card.querySelector('.delete-btn').addEventListener('click', () => deleteModel(m.name));
     list.appendChild(card);
   }
@@ -454,6 +554,7 @@ async function browseRepo() {
   clearErr('repo-error');
   const results = document.getElementById('repo-results');
   results.innerHTML = '<p class="msg-loading">Fetching file list…</p>';
+  fetchAndRenderReadme(repoId);
   try {
     const resp = await fetch('/api/repo?id=' + encodeURIComponent(repoId));
     if (!resp.ok) throw new Error(await resp.text());
@@ -465,24 +566,37 @@ async function browseRepo() {
   }
 }
 
-function defaultMmproj(mmprojFiles) {
-  const f16 = mmprojFiles.find(f => f.filename.toLowerCase().includes('f16'));
-  return (f16 || mmprojFiles[0] || {}).filename || '';
-}
-
 function renderRepoInfo(repoId, info) {
   const results = document.getElementById('repo-results');
   const files = info.models || [];
-  if (!files.length && !(info.mmproj || []).length) {
+  const sidecars = info.sidecars || [];
+  if (!files.length && !sidecars.length) {
     results.innerHTML = '<p class="msg-empty">No GGUF files found in this repo.</p>';
     return;
   }
   results.innerHTML = '';
 
+  // Tags row
+  const tagItems = [];
+  if (info.pipelineTag) tagItems.push(`<span class="badge badge-pipeline">${esc(info.pipelineTag)}</span>`);
+  for (const t of (info.tags || [])) {
+    if (t !== info.pipelineTag) tagItems.push(`<span class="badge badge-tag">${esc(t)}</span>`);
+  }
+  if (tagItems.length) {
+    const row = document.createElement('div');
+    row.className = 'tags-row';
+    row.innerHTML = tagItems.join('');
+    results.appendChild(row);
+  }
+
   if (info.isVision) {
     const hdr = document.createElement('div');
-    hdr.style.cssText = 'padding:4px 0 8px;font-size:0.78rem;color:#7dd3fc';
-    hdr.innerHTML = '<span class="badge badge-vision">Vision model</span> &nbsp;Includes a multimodal projector (mmproj) for image understanding.';
+    hdr.style.cssText = 'padding:4px 0 8px;font-size:0.78rem;';
+    if (sidecars.length > 0) {
+      hdr.innerHTML = '<span class="badge badge-vision">Vision</span> &nbsp;<span style="color:#7dd3fc">Multimodal projector included — select companion files below.</span>';
+    } else {
+      hdr.innerHTML = '<span class="badge badge-vision">Vision</span> &nbsp;<span style="color:#fbbf24">No companion files in this repo — check the model card for the mmproj source.</span>';
+    }
     results.appendChild(hdr);
   }
 
@@ -491,13 +605,16 @@ function renderRepoInfo(repoId, info) {
     const row = document.createElement('div');
     row.className = 'file-row' + (tooBig ? ' file-row-toobig' : '');
 
-    let mmprojSelectHtml = '';
-    if (info.isVision && (info.mmproj || []).length > 0) {
-      const defVal = defaultMmproj(info.mmproj);
-      const opts = info.mmproj.map(m =>
-        `<option value="${esc(m.filename)}" ${m.filename === defVal ? 'selected' : ''}>${esc(m.filename)}${m.size != null ? ' (' + formatBytes(m.size) + ')' : ''}</option>`
+    let sidecarsHtml = '';
+    if (sidecars.length > 0) {
+      const items = sidecars.map((s, i) =>
+        `<div class="sidecar-row">
+          <input type="checkbox" class="sidecar-cb" data-idx="${i}" checked>
+          <span class="sidecar-name">${esc(s.filename)}</span>
+          ${s.size != null ? `<span class="sidecar-size">${esc(formatBytes(s.size))}</span>` : ''}
+        </div>`
       ).join('');
-      mmprojSelectHtml = `<div class="vision-select-row"><label>mmproj:</label><select class="mmproj-select">${opts}</select></div>`;
+      sidecarsHtml = `<div class="sidecars-wrap"><span class="sidecars-label">Companion files:</span>${items}</div>`;
     }
 
     row.innerHTML = `
@@ -507,17 +624,17 @@ function renderRepoInfo(repoId, info) {
           <span class="file-size">${esc(formatBytes(f.size))}</span>
           ${tooBig ? '<span class="badge" style="background:#7f1d1d;color:#fca5a5">Insufficient space</span>' : ''}
         </div>
-        ${mmprojSelectHtml}
+        ${sidecarsHtml}
       </div>
       <button class="btn-primary dl-btn" ${downloadInProgress ? 'disabled' : ''}>Download</button>
     `;
 
     const btn = row.querySelector('.dl-btn');
     btn.addEventListener('click', () => {
-      const sel = row.querySelector('.mmproj-select');
-      const mmprojFile = sel ? sel.value : '';
-      const totalSize = (f.size || 0) + (sel ? (info.mmproj.find(m => m.filename === sel.value)?.size || 0) : 0);
-      startDownload(repoId, f.filename, mmprojFile, totalSize);
+      const checked = [...row.querySelectorAll('.sidecar-cb:checked')];
+      const selectedSidecars = checked.map(cb => sidecars[+cb.dataset.idx].filename);
+      const sidecarSize = checked.reduce((sum, cb) => sum + (sidecars[+cb.dataset.idx].size || 0), 0);
+      startDownload(repoId, f.filename, selectedSidecars, (f.size || 0) + sidecarSize);
     });
     results.appendChild(row);
   }
@@ -525,23 +642,39 @@ function renderRepoInfo(repoId, info) {
 
 // ── Download ───────────────────────────────────────────────────────────────
 
-async function startDownload(repoId, filename, mmprojFile, totalSize) {
+async function startDownload(repoId, filename, sidecarFiles, totalSize, force) {
   if (downloadInProgress) return;
   if (warnDownloadBytes > 0 && totalSize != null && totalSize > warnDownloadBytes) {
     const gb = (totalSize / 1073741824).toFixed(2);
     if (!confirm(`This download is ${gb} GB. Continue?`)) return;
   }
+  const body = { repoId, filename };
+  if (sidecarFiles && sidecarFiles.length) body.sidecarFiles = sidecarFiles;
+  if (force) body.force = true;
+  let resp;
   try {
-    const body = { repoId, filename };
-    if (mmprojFile) body.mmprojFile = mmprojFile;
-    const resp = await fetch('/api/download', {
+    resp = await fetch('/api/download', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!resp.ok) throw new Error(await resp.text());
   } catch (e) {
     setStatusBar('Error', 'Failed to start download: ' + e.message, false);
+    return;
+  }
+  if (resp.status === 409) {
+    let conflict;
+    try { conflict = await resp.json(); } catch (_) { conflict = {}; }
+    if (conflict.conflict === 'exists') {
+      const repoLine = conflict.existingRepoId ? `\nOriginally from: ${conflict.existingRepoId}` : '';
+      if (!confirm(`Model "${conflict.modelName}" already exists.${repoLine}\n\nReplace it with a fresh download?`)) return;
+      return startDownload(repoId, filename, sidecarFiles, totalSize, true);
+    }
+    setStatusBar('Error', 'Download conflict: ' + (conflict.message || resp.statusText), false);
+    return;
+  }
+  if (!resp.ok) {
+    setStatusBar('Error', 'Failed to start download: ' + (await resp.text()), false);
     return;
   }
   setDownloadState(true);
@@ -594,9 +727,24 @@ function setDownloadState(inProgress) {
   document.getElementById('cancel-dl-btn').style.display = inProgress ? 'inline-block' : 'none';
 }
 
+// ── Status pill menu ───────────────────────────────────────────────────────
+
+function toggleStatusMenu(e) {
+  e.stopPropagation();
+  document.getElementById('status-menu').classList.toggle('open');
+}
+
+document.addEventListener('click', () => {
+  document.getElementById('status-menu').classList.remove('open');
+});
+
+document.getElementById('status-indicator').addEventListener('click', toggleStatusMenu);
+
 // ── Restart service ────────────────────────────────────────────────────────
 
 async function restartService() {
+  document.getElementById('status-menu').classList.remove('open');
+  if (!confirm('Restart llama-server service?\n\nThe server will be briefly unavailable.')) return;
   const btn = document.getElementById('restart-btn');
   btn.disabled = true;
   setStatusBar('Restart', 'Restarting llama-server…', true);
@@ -609,6 +757,26 @@ async function restartService() {
     setStatusBar('Error', 'Restart failed: ' + e.message, false);
   } finally {
     btn.disabled = false;
+  }
+}
+
+// ── README ─────────────────────────────────────────────────────────────────
+
+async function fetchAndRenderReadme(repoId) {
+  const content = document.getElementById('readme-content');
+  const label = document.getElementById('readme-repo-label');
+  label.textContent = repoId;
+  content.innerHTML = '<p class="msg-loading">Loading…</p>';
+  try {
+    const resp = await fetch('/api/readme?id=' + encodeURIComponent(repoId));
+    if (resp.status === 404) {
+      content.innerHTML = '<p class="msg-empty">No README found for this repo.</p>';
+      return;
+    }
+    if (!resp.ok) throw new Error(await resp.text());
+    content.innerHTML = await resp.text();
+  } catch (e) {
+    content.innerHTML = `<p class="msg-error">Failed to load README: ${esc(e.message)}</p>`;
   }
 }
 
@@ -648,6 +816,7 @@ document.getElementById('refresh-btn').addEventListener('click', fetchLocalModel
 document.getElementById('browse-btn').addEventListener('click', browseRepo);
 document.getElementById('restart-btn').addEventListener('click', restartService);
 document.getElementById('cancel-dl-btn').addEventListener('click', cancelDownload);
+document.getElementById('status-menu').addEventListener('click', (e) => e.stopPropagation());
 document.getElementById('repo-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') browseRepo();
 });

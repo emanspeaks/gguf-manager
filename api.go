@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -11,6 +13,8 @@ import (
 	"syscall"
 
 	"github.com/emanspeaks/gguf-manager/internal/ini"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
 )
 
 type server struct {
@@ -44,15 +48,16 @@ func getDiskInfo(path string) (diskInfo, error) {
 }
 
 type localModel struct {
-	Name        string   `json:"name"`
-	Path        string   `json:"path"`
-	SizeBytes   int64    `json:"sizeBytes"`
-	Files       []string `json:"files"`
-	Loaded      bool     `json:"loaded"`
-	IsVision    bool     `json:"isVision"`
-	Mmproj      string   `json:"mmproj"`
-	InPreset    bool     `json:"inPreset"`
+	Name        string            `json:"name"`
+	Path        string            `json:"path"`
+	SizeBytes   int64             `json:"sizeBytes"`
+	Files       []string          `json:"files"`
+	Loaded      bool              `json:"loaded"`
+	IsVision    bool              `json:"isVision"`
+	Mmproj      string            `json:"mmproj"`
+	InPreset    bool              `json:"inPreset"`
 	PresetEntry map[string]string `json:"presetEntry,omitempty"`
+	RepoID      string            `json:"repoId,omitempty"`
 }
 
 func (s *server) handleLocal(w http.ResponseWriter, r *http.Request) {
@@ -119,6 +124,7 @@ func (s *server) handleLocal(w http.ResponseWriter, r *http.Request) {
 			Mmproj:      mmprojName,
 			InPreset:    inPreset,
 			PresetEntry: presetEntry,
+			RepoID:      readModelMeta(modelDir).RepoID,
 		})
 	}
 	writeJSON(w, models)
@@ -201,6 +207,69 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+var mdRenderer = goldmark.New(goldmark.WithExtensions(extension.GFM))
+
+func (s *server) handleReadme(w http.ResponseWriter, r *http.Request) {
+	repoID := r.URL.Query().Get("id")
+	if repoID == "" {
+		http.Error(w, "missing id parameter", http.StatusBadRequest)
+		return
+	}
+	if strings.Count(repoID, "/") != 1 || strings.Contains(repoID, "..") || strings.ContainsAny(repoID, " \t\n") {
+		http.Error(w, "invalid repo id", http.StatusBadRequest)
+		return
+	}
+	url := "https://huggingface.co/" + repoID + "/resolve/main/README.md"
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if s.cfg.HFToken != "" {
+		req.Header.Set("Authorization", "Bearer "+s.cfg.HFToken)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		http.Error(w, "failed to fetch readme: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		http.Error(w, "HuggingFace returned non-OK status", http.StatusBadGateway)
+		return
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "failed to read readme", http.StatusInternalServerError)
+		return
+	}
+	raw = stripFrontmatter(raw)
+	var buf bytes.Buffer
+	if err := mdRenderer.Convert(raw, &buf); err != nil {
+		http.Error(w, "failed to render readme", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(buf.Bytes())
+}
+
+// stripFrontmatter removes the YAML ---...--- block at the top of model cards.
+func stripFrontmatter(b []byte) []byte {
+	if !bytes.HasPrefix(b, []byte("---")) {
+		return b
+	}
+	end := bytes.Index(b[3:], []byte("\n---"))
+	if end < 0 {
+		return b
+	}
+	rest := b[3+end+4:]
+	return bytes.TrimLeft(rest, "\n")
+}
+
 func (s *server) handleRepo(w http.ResponseWriter, r *http.Request) {
 	repoID := r.URL.Query().Get("id")
 	if repoID == "" {
@@ -217,9 +286,10 @@ func (s *server) handleRepo(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		RepoID      string `json:"repoId"`
-		Filename    string `json:"filename"`
-		MmprojFile  string `json:"mmprojFile"`
+		RepoID       string   `json:"repoId"`
+		Filename     string   `json:"filename"`
+		SidecarFiles []string `json:"sidecarFiles"`
+		Force        bool     `json:"force"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -229,7 +299,26 @@ func (s *server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "repoId and filename are required", http.StatusBadRequest)
 		return
 	}
-	if err := s.dl.start(req.RepoID, req.Filename, req.MmprojFile); err != nil {
+
+	if !req.Force {
+		modelName := modelNameFromFilename(req.Filename)
+		if modelName != "" {
+			destDir := filepath.Join(s.cfg.ModelsDir, modelName)
+			if _, err := os.Stat(destDir); err == nil {
+				existingRepoID := readModelMeta(destDir).RepoID
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				json.NewEncoder(w).Encode(map[string]string{
+					"conflict":       "exists",
+					"modelName":      modelName,
+					"existingRepoId": existingRepoID,
+				})
+				return
+			}
+		}
+	}
+
+	if err := s.dl.start(req.RepoID, req.Filename, req.SidecarFiles, req.Force); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
