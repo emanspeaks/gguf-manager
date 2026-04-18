@@ -451,10 +451,10 @@ function esc(str) {
 
 function formatBytes(n) {
   if (n == null) return 'unknown';
-  if (n < 1000) return n + ' B';
-  if (n < 1000000) return (n / 1000).toFixed(1) + ' KB';
-  if (n < 1000000000) return (n / 1000000).toFixed(1) + ' MB';
-  return (n / 1000000000).toFixed(2) + ' GB';
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KiB';
+  if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MiB';
+  return (n / 1073741824).toFixed(2) + ' GiB';
 }
 
 function formatETA(secs) {
@@ -818,7 +818,7 @@ async function startDownload(repoId, filenames, sidecarFiles, totalSize, force) 
   if (!Array.isArray(filenames)) filenames = [filenames]; // compat
   if (warnDownloadBytes > 0 && totalSize != null && totalSize > warnDownloadBytes) {
     const gb = (totalSize / 1073741824).toFixed(2);
-    if (!confirm(`This download is ${gb} GB. Continue?`)) return;
+    if (!confirm(`This download is ${gb} GiB. Continue?`)) return;
   }
   const body = { repoId, filenames, totalBytes: totalSize || 0 };
   if (sidecarFiles && sidecarFiles.length) body.sidecarFiles = sidecarFiles;
