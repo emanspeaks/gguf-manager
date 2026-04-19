@@ -65,6 +65,26 @@ type localModel struct {
 	RepoID      string            `json:"repoId,omitempty"`
 }
 
+// modelMetaParentDir returns the direct child of modelsDir that is an ancestor
+// of (or equal to) dir. This is the canonical location for .w84ggufman.json,
+// regardless of how deeply nested the actual model files are. Returns "" when
+// dir is not under modelsDir.
+func modelMetaParentDir(dir, modelsDir string) string {
+	dir = filepath.Clean(dir)
+	modelsDir = filepath.Clean(modelsDir)
+	prev := dir
+	for {
+		parent := filepath.Dir(prev)
+		if parent == modelsDir {
+			return prev
+		}
+		if parent == prev {
+			return "" // reached fs root without crossing modelsDir
+		}
+		prev = parent
+	}
+}
+
 // iniModelDir returns the directory that contains (or IS) the model for an INI
 // section. When the "model" key points to a .gguf file, returns its parent dir.
 // When it points to a directory (sharded model or bare quant dir), returns the
@@ -141,17 +161,26 @@ func (s *server) handleLocal(w http.ResponseWriter, r *http.Request) {
 				mmprojName = filepath.Base(mmprojPath)
 			}
 
-			// Prefer meta from modelDir, then parent dir (nested layout).
+			// Walk up from modelDir toward ModelsDir to find .w84ggufman.json.
+			// This handles flat, one-level-nested, and doubly-nested layouts.
 			repoID := ""
 			if modelDir != "" {
-				repoID = readModelMeta(modelDir).RepoID
-				if repoID == "" {
-					repoID = readModelMeta(filepath.Dir(modelDir)).RepoID
+				for dir := filepath.Clean(modelDir); dir != s.cfg.ModelsDir && dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
+					if meta := readModelMeta(dir); meta.RepoID != "" {
+						repoID = meta.RepoID
+						break
+					}
 				}
 				if repoID == "" && len(files) > 0 {
 					repoID = detectRepoIDFromGGUF(modelDir, files)
 					if repoID != "" {
-						_ = writeModelMeta(modelDir, repoID)
+						// Write to the model parent dir (direct child of ModelsDir),
+						// not the quant subdir, so it survives individual quant deletion.
+						writeDir := modelMetaParentDir(modelDir, s.cfg.ModelsDir)
+						if writeDir == "" {
+							writeDir = modelDir
+						}
+						_ = writeModelMeta(writeDir, repoID)
 					}
 				}
 			}
@@ -404,7 +433,6 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		pct = 80
 	}
 	warnVram := uint64(float64(s.vramBytes) * pct / 100)
-	vramUsed, vramUsedKnown := detectVRAMUsedBytes(s.cfg.LlamaService)
 	writeJSON(w, statusResponse{
 		LlamaReachable:     reachable,
 		DownloadInProgress: inProgress,
@@ -413,8 +441,8 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Disk:               disk,
 		WarnDownloadBytes:  warnBytes,
 		VramBytes:          s.vramBytes,
-		VramUsedBytes:      vramUsed,
-		VramUsedKnown:      vramUsedKnown,
+		VramUsedBytes:      0,
+		VramUsedKnown:      false,
 		WarnVramBytes:      warnVram,
 		LoadedModels:       loadedIDs,
 	})
