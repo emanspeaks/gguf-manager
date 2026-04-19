@@ -54,6 +54,10 @@ pass it with `--config`:
   // systemd service to restart after downloads / deletes
   "llamaService": "llama-cpp.service",
 
+  // systemd service name for w84ggufman itself — enables the
+  // "Restart w84ggufman" button in the UI. Set to "" to disable.
+  "selfService": "w84ggufman.service",
+
   // Port this app listens on
   "port": 9293,
 
@@ -126,14 +130,17 @@ the NixOS module option.
 
 ## Polkit setup
 
-w84ggufman restarts llama-server via D-Bus (`org.freedesktop.systemd1.manage-units`).
-Without a polkit rule granting this permission to the process user, you'll see
-`connection reset by peer` in the status bar when restarting or after a download.
+w84ggufman restarts llama-server (and optionally itself) via D-Bus
+(`org.freedesktop.systemd1.manage-units`). Without a polkit rule granting this
+permission to the process user, you'll see `connection reset by peer` in the
+status bar when restarting or after a download. The "Restart w84ggufman" button
+also requires the polkit rule to cover `selfService`.
 
 ### NixOS — using the service module
 
 Enable `services.w84ggufman` (see [NixOS](#nixos) section below). The module
-installs the polkit rule automatically for the service user. No further action needed.
+installs the polkit rule automatically, covering both `llamaService` and
+`selfService`. No further action needed.
 
 ### NixOS — running the binary directly
 
@@ -145,7 +152,7 @@ automatically. Add it to your `configuration.nix`:
 security.polkit.extraConfig = ''
   polkit.addRule(function(action, subject) {
     if (action.id == "org.freedesktop.systemd1.manage-units" &&
-        action.lookup("unit") == "llama-cpp.service" &&
+        ["llama-cpp.service", "w84ggufman.service"].indexOf(action.lookup("unit")) >= 0 &&
         subject.user == "w84ggufman") {
       return polkit.Result.YES;
     }
@@ -153,8 +160,10 @@ security.polkit.extraConfig = ''
 '';
 ```
 
-Replace `w84ggufman` with whatever user runs the binary, and
-`llama-cpp.service` with your actual service name if it differs. Then rebuild:
+Replace `w84ggufman` with whatever user runs the binary, and adjust the service
+names to match your setup. Omit `w84ggufman.service` from the list (or set
+`"selfService": ""` in config) if you don't want the UI self-restart feature.
+Then rebuild:
 
 ```sh
 sudo nixos-rebuild switch
@@ -168,7 +177,7 @@ Drop a rules file into `/etc/polkit-1/rules.d/`:
 sudo tee /etc/polkit-1/rules.d/50-w84ggufman.rules <<'EOF'
 polkit.addRule(function(action, subject) {
   if (action.id == "org.freedesktop.systemd1.manage-units" &&
-      action.lookup("unit") == "llama-cpp.service" &&
+      ["llama-cpp.service", "w84ggufman.service"].indexOf(action.lookup("unit")) >= 0 &&
       subject.user == "your-username") {
     return polkit.Result.YES;
   }
@@ -176,7 +185,7 @@ polkit.addRule(function(action, subject) {
 EOF
 ```
 
-Replace `your-username` and `llama-cpp.service` as above. Polkit picks up new
+Replace `your-username` and the service names as above. Polkit picks up new
 rules files without a restart.
 
 ## NixOS
@@ -205,6 +214,7 @@ Add w84ggufman as a flake input and import the NixOS module:
             modelsDir      = "/var/lib/llama-models";
             llamaServerURL = "http://localhost:9292";
             llamaService   = "llama-cpp.service";
+            # selfService = "w84ggufman.service";  # default; enables UI self-restart
             # hfToken = "hf_...";  # see note below about secrets
 
             # VRAM warnings — set vramGiB manually when using unified memory
@@ -259,7 +269,7 @@ so you do **not** need a tmpfiles rule for it.
 | `w84ggufman` system user | `users.users.w84ggufman` with `isSystemUser = true` |
 | `HF_HOME` | Set to `${modelsDir}/.hf-cache` so `hf` never tries to write to `/.cache` |
 | `.hf-cache` directory | Created via `systemd.tmpfiles` owned by the service user |
-| polkit rule | Allows service user to restart `llamaService` via D-Bus without root |
+| polkit rule | Allows service user to restart `llamaService` and `selfService` via D-Bus without root |
 
 If you run the binary outside the module, see the
 [Polkit setup](#polkit-setup) section above.
@@ -290,6 +300,9 @@ gomod2nix generate
 | `DELETE` | `/api/local/{name}` | Delete a model directory |
 | `GET` | `/api/status` | App state: llama reachability, download in progress |
 | `POST` | `/api/restart` | Restart the configured llama service via D-Bus |
+| `POST` | `/api/restart-self` | Restart the w84ggufman service itself via D-Bus |
+| `GET` | `/api/preset/raw/{name}` | Get the raw INI block for a model |
+| `PUT` | `/api/preset/raw/{name}` | Replace the raw INI block for a model |
 
 ## Building
 
