@@ -266,7 +266,11 @@ func queryAMDGPUVRAMUsed(devicePath string) (uint64, bool) {
 		log.Printf("VRAM: AMDGPU_INFO_MEMORY ioctl on %s: errno %d", devicePath, errno)
 		return 0, false
 	}
-	return mem.VRAM.HeapUsage, true
+	// On unified-memory APUs the driver splits allocations between the VRAM heap
+	// (BIOS carve-out) and the GTT heap (system RAM mapped to GPU address space).
+	// Summing both matches what nvtop reports via fdinfo drm-memory-vram, which
+	// covers all VRAM-domain usage regardless of backing store.
+	return mem.VRAM.HeapUsage + mem.GTT.HeapUsage, true
 }
 
 // detectVRAMUsedBytes probes the system for current GPU memory usage in bytes.
@@ -288,19 +292,18 @@ func detectVRAMUsedBytes() (uint64, bool) {
 		}
 	}
 
-	// AMD: fdinfo first (nvtop's approach), ioctl as fallback.
-	// The fdinfo sum of drm-memory-vram across unique DRM clients matches what
-	// nvtop reports and correctly reflects TTM-pool allocations on unified-memory
-	// APUs. The ioctl (AMDGPU_INFO_MEMORY) returns only the BIOS carve-out heap
-	// usage on APUs, under-counting allocations that land in the TTM pool.
-	dev := amdRenderDevice() // populates amdDevPCIAddr regardless of render node
-	if amdDevPCIAddr != "" {
-		if used, ok := amdFDInfoVRAMUsed(amdDevPCIAddr); ok {
+	// AMD: ioctl first (AMDGPU_INFO_MEMORY, VRAM+GTT heaps), fdinfo as fallback.
+	// The ioctl is preferred because it works without ptrace/root access; the
+	// systemd service can read its own render node but not other processes'
+	// /proc/*/fdinfo/*. fdinfo is kept as a fallback for root/user-mode use.
+	dev := amdRenderDevice() // also populates amdDevPCIAddr
+	if dev != "" {
+		if used, ok := queryAMDGPUVRAMUsed(dev); ok {
 			return used, true
 		}
 	}
-	if dev != "" {
-		if used, ok := queryAMDGPUVRAMUsed(dev); ok {
+	if amdDevPCIAddr != "" {
+		if used, ok := amdFDInfoVRAMUsed(amdDevPCIAddr); ok {
 			return used, true
 		}
 	}
