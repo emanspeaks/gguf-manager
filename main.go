@@ -117,6 +117,21 @@ func logRequests(next http.Handler) http.Handler {
 
 var shardRe = regexp.MustCompile(`-\d{5}-of-\d{5}\.gguf$`)
 
+// findFirstShard returns the path to the first shard file (-00001-of-) among
+// files, falling back to the first file alphabetically. files must be basenames;
+// dir is the containing directory.
+func findFirstShard(dir string, files []string) string {
+	for _, f := range files {
+		if strings.Contains(f, "-00001-of-") {
+			return filepath.Join(dir, f)
+		}
+	}
+	if len(files) > 0 {
+		return filepath.Join(dir, files[0])
+	}
+	return dir
+}
+
 // ensureManagedINI creates modelsDir/managed.ini if it does not already exist,
 // pre-populated with entries for any model directories already on disk.
 // llama-server requires the file to be present when started with --models-preset.
@@ -161,14 +176,6 @@ func ensureManagedINI(modelsDir string) {
 				continue
 			}
 
-			// Sharded models: use the directory path so llama-server auto-detects.
-			var modelPath string
-			if len(modelFiles) > 1 || shardRe.MatchString(modelFiles[0]) {
-				modelPath = dir
-			} else {
-				modelPath = filepath.Join(dir, modelFiles[0])
-			}
-
 			mmprojPath := ""
 			if len(mmprojFiles) > 0 {
 				// Prefer F16 mmproj if available.
@@ -182,7 +189,27 @@ func ensureManagedINI(modelsDir string) {
 				mmprojPath = filepath.Join(dir, chosen)
 			}
 
-			entries = append(entries, modelEntry{d.Name(), modelPath, mmprojPath})
+			// Check whether the files are shards of one quant or separate quants.
+			allShards := true
+			for _, f := range modelFiles {
+				if !shardRe.MatchString(f) {
+					allShards = false
+					break
+				}
+			}
+
+			if len(modelFiles) > 1 && !allShards {
+				// Multiple separate quants sharing a directory: create one INI entry
+				// per file so each can be loaded independently in llama-server.
+				for _, f := range modelFiles {
+					quantName := strings.TrimSuffix(f, ".gguf")
+					entries = append(entries, modelEntry{quantName, filepath.Join(dir, f), mmprojPath})
+				}
+			} else {
+				// Single quant (possibly sharded): point to first shard or the file.
+				modelPath := findFirstShard(dir, modelFiles)
+				entries = append(entries, modelEntry{d.Name(), modelPath, mmprojPath})
+			}
 		}
 	}
 

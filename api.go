@@ -329,16 +329,20 @@ func (s *server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !req.Force {
-		modelName := modelDirName(req.Filenames)
-		if modelName != "" {
-			destDir := filepath.Join(s.cfg.ModelsDir, modelName)
+		// Check each quant's destination directory individually.
+		for _, filename := range req.Filenames {
+			name := modelNameFromFilename(filename)
+			if name == "" {
+				continue
+			}
+			destDir := filepath.Join(s.cfg.ModelsDir, name)
 			if _, err := os.Stat(destDir); err == nil {
 				existingRepoID := readModelMeta(destDir).RepoID
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusConflict)
 				json.NewEncoder(w).Encode(map[string]string{
 					"conflict":       "exists",
-					"modelName":      modelName,
+					"modelName":      name,
 					"existingRepoId": existingRepoID,
 				})
 				return

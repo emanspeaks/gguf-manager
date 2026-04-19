@@ -182,9 +182,17 @@ func RemoveSection(path, section string) error {
 		}
 	}
 
-	// Also consume blank lines immediately before [section] header.
-	for start > 0 && strings.TrimSpace(lines[start-1]) == "" {
-		start--
+	// Walk back over blank lines immediately before [section] header.
+	blankStart := start
+	for blankStart > 0 && strings.TrimSpace(lines[blankStart-1]) == "" {
+		blankStart--
+	}
+	// When content exists on both sides of the removed block, preserve exactly
+	// one blank separator line; otherwise consume all leading blank lines.
+	if blankStart > 0 && end < len(lines) {
+		start = blankStart + 1 // keep one blank (at blankStart) as separator
+	} else {
+		start = blankStart
 	}
 
 	out := make([]string, 0, len(lines)-(end-start))

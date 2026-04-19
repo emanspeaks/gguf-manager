@@ -444,3 +444,39 @@ func TestReplaceSectionBodyNotFound(t *testing.T) {
 		t.Error("AlphaModel lost after append")
 	}
 }
+
+func TestRemoveSectionPreservesBlankLine(t *testing.T) {
+	// Three-section file: removing the middle section must leave exactly one
+	// blank separator line between the surrounding blocks.
+	const src = `[*]
+ctx-size = 65536
+
+[AlphaModel]
+model = /models/alpha.gguf
+
+[BetaModel]
+model = /models/beta.gguf
+
+[ZetaModel]
+model = /models/zeta.gguf
+`
+	p := writeTemp(t, src)
+	if err := RemoveSection(p, "BetaModel"); err != nil {
+		t.Fatalf("RemoveSection: %v", err)
+	}
+	out := readTemp(t, p)
+
+	if strings.Contains(out, "BetaModel") {
+		t.Error("BetaModel still present after removal")
+	}
+	if !strings.Contains(out, "[AlphaModel]") {
+		t.Error("AlphaModel lost")
+	}
+	if !strings.Contains(out, "[ZetaModel]") {
+		t.Error("ZetaModel lost")
+	}
+	// Must have at least one blank line between AlphaModel and ZetaModel.
+	if strings.Contains(out, "model = /models/alpha.gguf\n[ZetaModel]") {
+		t.Error("no blank separator line between AlphaModel and ZetaModel after removal")
+	}
+}
