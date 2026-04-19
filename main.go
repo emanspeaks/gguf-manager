@@ -64,8 +64,11 @@ func main() {
 	mux.HandleFunc("DELETE /api/local/{name}", srv.handleDeleteLocal)
 	mux.HandleFunc("GET /api/status", srv.handleStatus)
 	mux.HandleFunc("POST /api/restart", srv.handleRestart)
+	mux.HandleFunc("POST /api/restart-self", srv.handleRestartSelf)
 	mux.HandleFunc("GET /api/preset", srv.handleGetPreset)
 	mux.HandleFunc("POST /api/preset/global", srv.handleUpdatePresetGlobal)
+	mux.HandleFunc("GET /api/preset/raw/{name}", srv.handleGetPresetRaw)
+	mux.HandleFunc("PUT /api/preset/raw/{name}", srv.handleUpdatePresetRaw)
 	mux.HandleFunc("POST /api/preset/{name}", srv.handleUpdatePresetModel)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
@@ -114,6 +117,21 @@ func logRequests(next http.Handler) http.Handler {
 
 var shardRe = regexp.MustCompile(`-\d{5}-of-\d{5}\.gguf$`)
 
+// findFirstShard returns the path to the first shard file (-00001-of-) among
+// files, falling back to the first file alphabetically. files must be basenames;
+// dir is the containing directory.
+func findFirstShard(dir string, files []string) string {
+	for _, f := range files {
+		if strings.Contains(f, "-00001-of-") {
+			return filepath.Join(dir, f)
+		}
+	}
+	if len(files) > 0 {
+		return filepath.Join(dir, files[0])
+	}
+	return dir
+}
+
 // ensureManagedINI creates modelsDir/managed.ini if it does not already exist,
 // pre-populated with entries for any model directories already on disk.
 // llama-server requires the file to be present when started with --models-preset.
@@ -136,50 +154,95 @@ func ensureManagedINI(modelsDir string) {
 			if !d.IsDir() {
 				continue
 			}
-			dir := filepath.Join(modelsDir, d.Name())
-			files, err := os.ReadDir(dir)
+			parentDir := filepath.Join(modelsDir, d.Name())
+			parentFiles, err := os.ReadDir(parentDir)
 			if err != nil {
 				continue
 			}
 
-			var modelFiles, mmprojFiles []string
-			for _, f := range files {
-				if f.IsDir() || !strings.HasSuffix(f.Name(), ".gguf") {
-					continue
+			// Collect gguf files at the parent level and detect quant subdirs.
+			var topModelFiles, topMmprojFiles []string
+			var quantDirs []string
+			for _, f := range parentFiles {
+				if f.IsDir() {
+					quantDir := filepath.Join(parentDir, f.Name())
+					subFiles, _ := os.ReadDir(quantDir)
+					for _, sf := range subFiles {
+						if !sf.IsDir() && strings.HasSuffix(sf.Name(), ".gguf") &&
+							!strings.HasPrefix(strings.ToLower(sf.Name()), "mmproj-") {
+							quantDirs = append(quantDirs, f.Name())
+							break
+						}
+					}
+				} else if strings.HasSuffix(f.Name(), ".gguf") {
+					name := strings.ToLower(f.Name())
+					if strings.HasPrefix(name, "mmproj-") {
+						topMmprojFiles = append(topMmprojFiles, f.Name())
+					} else {
+						topModelFiles = append(topModelFiles, f.Name())
+					}
 				}
-				name := strings.ToLower(f.Name())
-				if strings.HasPrefix(name, "mmproj-") {
-					mmprojFiles = append(mmprojFiles, f.Name())
-				} else {
-					modelFiles = append(modelFiles, f.Name())
-				}
-			}
-			if len(modelFiles) == 0 {
-				continue
 			}
 
-			// Sharded models: use the directory path so llama-server auto-detects.
-			var modelPath string
-			if len(modelFiles) > 1 || shardRe.MatchString(modelFiles[0]) {
-				modelPath = dir
-			} else {
-				modelPath = filepath.Join(dir, modelFiles[0])
-			}
-
-			mmprojPath := ""
-			if len(mmprojFiles) > 0 {
-				// Prefer F16 mmproj if available.
-				chosen := mmprojFiles[0]
-				for _, f := range mmprojFiles {
+			// Choose mmproj from parent level (prefer F16).
+			pickMmproj := func(files []string, dir string) string {
+				if len(files) == 0 {
+					return ""
+				}
+				chosen := files[0]
+				for _, f := range files {
 					if strings.Contains(strings.ToLower(f), "f16") {
 						chosen = f
 						break
 					}
 				}
-				mmprojPath = filepath.Join(dir, chosen)
+				return filepath.Join(dir, chosen)
 			}
 
-			entries = append(entries, modelEntry{d.Name(), modelPath, mmprojPath})
+			if len(quantDirs) > 0 {
+				// New nested layout: each subdir is a quant.
+				mmprojPath := pickMmproj(topMmprojFiles, parentDir)
+				for _, qName := range quantDirs {
+					quantDir := filepath.Join(parentDir, qName)
+					subFiles, _ := os.ReadDir(quantDir)
+					var modelFiles []string
+					for _, sf := range subFiles {
+						if !sf.IsDir() && strings.HasSuffix(sf.Name(), ".gguf") &&
+							!strings.HasPrefix(strings.ToLower(sf.Name()), "mmproj-") {
+							modelFiles = append(modelFiles, sf.Name())
+						}
+					}
+					if len(modelFiles) == 0 {
+						continue
+					}
+					modelPath := findFirstShard(quantDir, modelFiles)
+					// Section name derived from the model filename for uniqueness across repos.
+					sectionName := modelNameFromFilename(filepath.Base(modelPath))
+					entries = append(entries, modelEntry{sectionName, modelPath, mmprojPath})
+				}
+			} else if len(topModelFiles) > 0 {
+				// Old flat layout: model files sit directly in this directory.
+				mmprojPath := pickMmproj(topMmprojFiles, parentDir)
+
+				// Check whether the files are shards of one quant or separate quants.
+				allShards := true
+				for _, f := range topModelFiles {
+					if !shardRe.MatchString(f) {
+						allShards = false
+						break
+					}
+				}
+
+				if len(topModelFiles) > 1 && !allShards {
+					for _, f := range topModelFiles {
+						quantName := strings.TrimSuffix(f, ".gguf")
+						entries = append(entries, modelEntry{quantName, filepath.Join(parentDir, f), mmprojPath})
+					}
+				} else {
+					modelPath := findFirstShard(parentDir, topModelFiles)
+					entries = append(entries, modelEntry{d.Name(), modelPath, mmprojPath})
+				}
+			}
 		}
 	}
 

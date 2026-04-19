@@ -359,3 +359,124 @@ func TestUpsertSectionKeysModelSection(t *testing.T) {
 		t.Error("mmproj lost from AlphaModel")
 	}
 }
+
+func TestReadSectionRawFound(t *testing.T) {
+	p := writeTemp(t, sampleINI)
+	body, err := ReadSectionRaw(p, "AlphaModel")
+	if err != nil {
+		t.Fatalf("ReadSectionRaw: %v", err)
+	}
+	if !strings.Contains(body, "model = /models/AlphaModel/alpha.gguf") {
+		t.Errorf("model key missing from body: %q", body)
+	}
+	// Should not include [AlphaModel] header or other sections.
+	if strings.Contains(body, "[AlphaModel]") {
+		t.Error("section header must not appear in body")
+	}
+	if strings.Contains(body, "ZetaModel") {
+		t.Error("other section leaked into body")
+	}
+}
+
+func TestReadSectionRawNotFound(t *testing.T) {
+	p := writeTemp(t, sampleINI)
+	body, err := ReadSectionRaw(p, "DoesNotExist")
+	if err != nil {
+		t.Fatalf("ReadSectionRaw: %v", err)
+	}
+	if body != "" {
+		t.Errorf("expected empty body for missing section, got %q", body)
+	}
+}
+
+func TestReadSectionRawMissingFile(t *testing.T) {
+	body, err := ReadSectionRaw(filepath.Join(t.TempDir(), "nope.ini"), "X")
+	if err != nil {
+		t.Fatalf("expected nil error for missing file, got %v", err)
+	}
+	if body != "" {
+		t.Errorf("expected empty body for missing file, got %q", body)
+	}
+}
+
+func TestReplaceSectionBodyExisting(t *testing.T) {
+	p := writeTemp(t, sampleINI)
+	newBody := "model = /models/AlphaModel/new.gguf\n; updated comment"
+	if err := ReplaceSectionBody(p, "AlphaModel", newBody); err != nil {
+		t.Fatalf("ReplaceSectionBody: %v", err)
+	}
+	out := readTemp(t, p)
+	if !strings.Contains(out, "model = /models/AlphaModel/new.gguf") {
+		t.Error("new model path not found")
+	}
+	if !strings.Contains(out, "; updated comment") {
+		t.Error("new comment not found")
+	}
+	// Old content gone.
+	if strings.Contains(out, "mmproj") {
+		t.Error("old mmproj line still present")
+	}
+	// Other sections and file header preserved.
+	if !strings.Contains(out, "[*]") {
+		t.Error("[*] section missing after replace")
+	}
+	if !strings.Contains(out, "ZetaModel") {
+		t.Error("ZetaModel section missing after replace")
+	}
+	if !strings.Contains(out, "; managed by w84ggufman") {
+		t.Error("file header comment lost")
+	}
+}
+
+func TestReplaceSectionBodyNotFound(t *testing.T) {
+	p := writeTemp(t, sampleINI)
+	if err := ReplaceSectionBody(p, "NewModel", "model = /x/new.gguf"); err != nil {
+		t.Fatalf("ReplaceSectionBody: %v", err)
+	}
+	out := readTemp(t, p)
+	if !strings.Contains(out, "[NewModel]") {
+		t.Error("new section not appended")
+	}
+	if !strings.Contains(out, "model = /x/new.gguf") {
+		t.Error("new body not present")
+	}
+	if !strings.Contains(out, "AlphaModel") {
+		t.Error("AlphaModel lost after append")
+	}
+}
+
+func TestRemoveSectionPreservesBlankLine(t *testing.T) {
+	// Three-section file: removing the middle section must leave exactly one
+	// blank separator line between the surrounding blocks.
+	const src = `[*]
+ctx-size = 65536
+
+[AlphaModel]
+model = /models/alpha.gguf
+
+[BetaModel]
+model = /models/beta.gguf
+
+[ZetaModel]
+model = /models/zeta.gguf
+`
+	p := writeTemp(t, src)
+	if err := RemoveSection(p, "BetaModel"); err != nil {
+		t.Fatalf("RemoveSection: %v", err)
+	}
+	out := readTemp(t, p)
+
+	if strings.Contains(out, "BetaModel") {
+		t.Error("BetaModel still present after removal")
+	}
+	if !strings.Contains(out, "[AlphaModel]") {
+		t.Error("AlphaModel lost")
+	}
+	if !strings.Contains(out, "[ZetaModel]") {
+		t.Error("ZetaModel lost")
+	}
+	// Must have at least one blank line between AlphaModel and ZetaModel.
+	if strings.Contains(out, "model = /models/alpha.gguf\n[ZetaModel]") {
+		t.Error("no blank separator line between AlphaModel and ZetaModel after removal")
+	}
+}

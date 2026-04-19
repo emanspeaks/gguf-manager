@@ -2,10 +2,15 @@
 
 let
   cfg = config.services.w84ggufman;
+  # Build list of units the service user is allowed to restart.
+  # Filter out any empty strings so that setting selfService = "" disables self-restart.
+  allowedUnits   = lib.filter (u: u != "") [ cfg.llamaService cfg.selfService ];
+  allowedUnitsJS = "[" + lib.concatMapStringsSep "," (u: "\"${u}\"") allowedUnits + "]";
   configFile = pkgs.writeText "w84ggufman.json" (builtins.toJSON {
     modelsDir         = cfg.modelsDir;
     llamaServerURL    = cfg.llamaServerURL;
     llamaService      = cfg.llamaService;
+    selfService       = cfg.selfService;
     port              = cfg.port;
     hfToken           = cfg.hfToken;
     warnDownloadGiB   = cfg.warnDownloadGiB;
@@ -49,6 +54,15 @@ in {
       type    = lib.types.str;
       default = "llama-cpp.service";
       description = "systemd service name to restart after model changes.";
+    };
+
+    selfService = lib.mkOption {
+      type    = lib.types.str;
+      default = "w84ggufman.service";
+      description = ''
+        systemd service name for the w84ggufman process itself.
+        Used by the "Restart w84ggufman" UI button. Set to "" to disable self-restart.
+      '';
     };
 
     hfToken = lib.mkOption {
@@ -133,11 +147,12 @@ in {
       "Z ${cfg.hfHome} 0775 ${cfg.serviceUser} ${cfg.serviceGroup} -"
     ];
 
-    # Allow the service user to restart the llama service without root.
+    # Allow the service user to restart managed services (llama-server and
+    # optionally w84ggufman itself) without root.
     security.polkit.extraConfig = ''
       polkit.addRule(function(action, subject) {
         if (action.id == "org.freedesktop.systemd1.manage-units" &&
-            action.lookup("unit") == "${cfg.llamaService}" &&
+            ${allowedUnitsJS}.indexOf(action.lookup("unit")) >= 0 &&
             subject.user == "${cfg.serviceUser}") {
           return polkit.Result.YES;
         }
