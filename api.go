@@ -4,16 +4,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/emanspeaks/w84ggufman/internal/ini"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 )
@@ -66,177 +65,184 @@ type localModel struct {
 	RepoID      string            `json:"repoId,omitempty"`
 }
 
-func (s *server) handleLocal(w http.ResponseWriter, r *http.Request) {
-	entries, err := os.ReadDir(s.cfg.ModelsDir)
+// iniModelDir returns the directory containing the model files for an INI section.
+// The section's "model" key gives the file path; we take its parent directory.
+func iniModelDir(section map[string]string) string {
+	if p := section["model"]; p != "" {
+		return filepath.Dir(p)
+	}
+	return ""
+}
+
+// scanModelDir returns all non-mmproj .gguf filenames and their total size in dir.
+// Only the top level is scanned; WalkDir is not used because model files for a
+// single quant are always in the same directory.
+func scanModelDir(dir string) (files []string, totalSize int64) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			writeJSON(w, []localModel{})
-			return
-		}
-		http.Error(w, "failed to read models dir: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".gguf") || matchesMmproj(e.Name()) {
+			continue
+		}
+		if info, err := e.Info(); err == nil {
+			totalSize += info.Size()
+		}
+		files = append(files, e.Name())
+	}
+	return
+}
 
+func (s *server) handleLocal(w http.ResponseWriter, r *http.Request) {
 	loadedModels, _ := s.fetchLoadedModels()
-	var presetFile *ini.File
-	presetFile, _ = s.preset.Load()
+	presetFile, _ := s.preset.Load()
 
 	models := make([]localModel, 0)
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		parentDir := filepath.Join(s.cfg.ModelsDir, entry.Name())
-		subEntries, err := os.ReadDir(parentDir)
-		if err != nil {
-			continue
-		}
+	coveredDirs := make(map[string]struct{})
 
-		// Find mmproj and model files at the parent (top) level.
-		var topModelFiles []string
-		var topMmprojFile string
-		for _, sub := range subEntries {
-			if sub.IsDir() || !strings.HasSuffix(sub.Name(), ".gguf") {
-				continue
+	// Primary: one card per INI section (sorted for stable output).
+	if presetFile != nil {
+		names := make([]string, 0, len(presetFile.Sections))
+		for n := range presetFile.Sections {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+
+		for _, name := range names {
+			section := presetFile.Sections[name]
+			modelDir := iniModelDir(section)
+			if modelDir != "" {
+				coveredDirs[filepath.Clean(modelDir)] = struct{}{}
 			}
-			if matchesMmproj(sub.Name()) {
-				if topMmprojFile == "" {
-					topMmprojFile = sub.Name()
+
+			var files []string
+			var totalSize int64
+			if modelDir != "" {
+				files, totalSize = scanModelDir(modelDir)
+			}
+
+			mmprojPath := section["mmproj"]
+			mmprojName := ""
+			if mmprojPath != "" {
+				mmprojName = filepath.Base(mmprojPath)
+			}
+
+			// Prefer meta from modelDir, then parent dir (nested layout).
+			repoID := ""
+			if modelDir != "" {
+				repoID = readModelMeta(modelDir).RepoID
+				if repoID == "" {
+					repoID = readModelMeta(filepath.Dir(modelDir)).RepoID
 				}
-			} else {
-				topModelFiles = append(topModelFiles, sub.Name())
+				if repoID == "" && len(files) > 0 {
+					repoID = detectRepoIDFromGGUF(modelDir, files)
+					if repoID != "" {
+						_ = writeModelMeta(modelDir, repoID)
+					}
+				}
 			}
-		}
 
-		// Check for quant subdirectories (new nested layout).
-		var quantSubdirs []fs.DirEntry
-		for _, sub := range subEntries {
-			if !sub.IsDir() {
+			_, loaded := loadedModels[name]
+			models = append(models, localModel{
+				Name:        name,
+				Path:        modelDir,
+				SizeBytes:   totalSize,
+				Files:       files,
+				Loaded:      loaded,
+				IsVision:    mmprojPath != "",
+				Mmproj:      mmprojName,
+				InPreset:    true,
+				PresetEntry: section,
+				RepoID:      repoID,
+			})
+		}
+	}
+
+	// Fallback: scan directories for models not covered by any INI section.
+	// Handles manually placed models and the old flat layout.
+	if dirEntries, err := os.ReadDir(s.cfg.ModelsDir); err == nil {
+		for _, entry := range dirEntries {
+			if !entry.IsDir() {
 				continue
 			}
-			quantDir := filepath.Join(parentDir, sub.Name())
-			subFiles, _ := os.ReadDir(quantDir)
-			for _, f := range subFiles {
-				if !f.IsDir() && strings.HasSuffix(f.Name(), ".gguf") && !matchesMmproj(f.Name()) {
-					quantSubdirs = append(quantSubdirs, sub)
+			parentDir := filepath.Join(s.cfg.ModelsDir, entry.Name())
+
+			// New nested layout: check quant subdirs.
+			subEntries, _ := os.ReadDir(parentDir)
+			mmprojFile := ""
+			for _, sub := range subEntries {
+				if !sub.IsDir() && strings.HasSuffix(sub.Name(), ".gguf") && matchesMmproj(sub.Name()) {
+					mmprojFile = sub.Name()
 					break
 				}
 			}
-		}
-
-		if len(quantSubdirs) > 0 {
-			// New nested layout: one card per quant subdir, mmproj shared from parent.
-			repoID := readModelMeta(parentDir).RepoID
-			for _, sub := range quantSubdirs {
-				quantDir := filepath.Join(parentDir, sub.Name())
-				var quantFiles []string
-				var totalSize int64
-				filepath.WalkDir(quantDir, func(path string, d fs.DirEntry, err error) error {
-					if err != nil || d.IsDir() {
-						return nil
-					}
-					if strings.HasSuffix(d.Name(), ".gguf") && !matchesMmproj(d.Name()) {
-						if info, e := d.Info(); e == nil {
-							totalSize += info.Size()
-						}
-						quantFiles = append(quantFiles, d.Name())
-					}
-					return nil
-				})
-				if len(quantFiles) == 0 {
+			for _, sub := range subEntries {
+				if !sub.IsDir() {
 					continue
 				}
-
+				quantDir := filepath.Join(parentDir, sub.Name())
+				if _, covered := coveredDirs[filepath.Clean(quantDir)]; covered {
+					continue
+				}
+				files, totalSize := scanModelDir(quantDir)
+				if len(files) == 0 {
+					continue
+				}
 				name := sub.Name()
 				_, loaded := loadedModels[name]
-				inPreset := false
-				var presetEntry map[string]string
-				if presetFile != nil {
-					if sec, ok := presetFile.Sections[name]; ok {
-						inPreset = true
-						presetEntry = sec
-					}
-				}
+				repoID := readModelMeta(parentDir).RepoID
 				if repoID == "" {
-					repoID = detectRepoIDFromGGUF(quantDir, quantFiles)
+					repoID = detectRepoIDFromGGUF(quantDir, files)
 					if repoID != "" {
 						_ = writeModelMeta(parentDir, repoID)
 					}
 				}
 				models = append(models, localModel{
-					Name:        name,
-					Path:        quantDir,
-					SizeBytes:   totalSize,
-					Files:       quantFiles,
-					Loaded:      loaded,
-					IsVision:    topMmprojFile != "",
-					Mmproj:      topMmprojFile,
-					InPreset:    inPreset,
-					PresetEntry: presetEntry,
-					RepoID:      repoID,
+					Name:      name,
+					Path:      quantDir,
+					SizeBytes: totalSize,
+					Files:     files,
+					Loaded:    loaded,
+					IsVision:  mmprojFile != "",
+					Mmproj:    mmprojFile,
+					InPreset:  false,
+					RepoID:    repoID,
 				})
 			}
-		} else if len(topModelFiles) > 0 {
-			// Old flat layout: model files sit directly in this directory.
-			var totalSize int64
-			for _, f := range topModelFiles {
-				if info, err := os.Stat(filepath.Join(parentDir, f)); err == nil {
-					totalSize += info.Size()
-				}
+
+			// Old flat layout: model files directly in parentDir.
+			if _, covered := coveredDirs[filepath.Clean(parentDir)]; covered {
+				continue
+			}
+			files, totalSize := scanModelDir(parentDir)
+			if len(files) == 0 {
+				continue
 			}
 			name := entry.Name()
 			_, loaded := loadedModels[name]
-			inPreset := false
-			var presetEntry map[string]string
-			if presetFile != nil {
-				if sec, ok := presetFile.Sections[name]; ok {
-					inPreset = true
-					presetEntry = sec
-				}
-			}
 			repoID := readModelMeta(parentDir).RepoID
 			if repoID == "" {
-				repoID = detectRepoIDFromGGUF(parentDir, topModelFiles)
+				repoID = detectRepoIDFromGGUF(parentDir, files)
 				if repoID != "" {
 					_ = writeModelMeta(parentDir, repoID)
 				}
 			}
 			models = append(models, localModel{
-				Name:        name,
-				Path:        parentDir,
-				SizeBytes:   totalSize,
-				Files:       topModelFiles,
-				Loaded:      loaded,
-				IsVision:    topMmprojFile != "",
-				Mmproj:      topMmprojFile,
-				InPreset:    inPreset,
-				PresetEntry: presetEntry,
-				RepoID:      repoID,
+				Name:      name,
+				Path:      parentDir,
+				SizeBytes: totalSize,
+				Files:     files,
+				Loaded:    loaded,
+				IsVision:  mmprojFile != "",
+				Mmproj:    mmprojFile,
+				InPreset:  false,
+				RepoID:    repoID,
 			})
 		}
 	}
-	writeJSON(w, models)
-}
 
-// findQuantDir searches for a model dir with the given name.
-// It first checks nested quant subdirs (new layout: ModelsDir/parent/name),
-// then falls back to top-level dirs (old layout: ModelsDir/name).
-// Returns the model dir, its parent dir, and whether it's nested.
-func (s *server) findQuantDir(name string) (modelDir, parentDir string, nested bool) {
-	if parents, err := os.ReadDir(s.cfg.ModelsDir); err == nil {
-		for _, p := range parents {
-			if !p.IsDir() {
-				continue
-			}
-			pDir := filepath.Join(s.cfg.ModelsDir, p.Name())
-			candidate := filepath.Join(pDir, name)
-			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-				return candidate, pDir, true
-			}
-		}
-	}
-	topLevel := filepath.Join(s.cfg.ModelsDir, name)
-	return topLevel, s.cfg.ModelsDir, false
+	writeJSON(w, models)
 }
 
 type llamaModelsResponse struct {
@@ -262,48 +268,81 @@ func (s *server) fetchLoadedModels() (map[string]struct{}, error) {
 	return loaded, nil
 }
 
+// cleanupEmptyParentDir removes parentDir if it contains no more quant subdirs
+// with model .gguf files. Safe to call after deleting the last quant in a parent.
+func (s *server) cleanupEmptyParentDir(parentDir string) {
+	if parentDir == "" || parentDir == s.cfg.ModelsDir {
+		return
+	}
+	entries, _ := os.ReadDir(parentDir)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		subFiles, _ := os.ReadDir(filepath.Join(parentDir, e.Name()))
+		for _, f := range subFiles {
+			if !f.IsDir() && strings.HasSuffix(f.Name(), ".gguf") && !matchesMmproj(f.Name()) {
+				return // still has quants
+			}
+		}
+	}
+	if err := removeAllWritable(parentDir); err != nil {
+		log.Printf("warning: could not remove empty model parent dir %q: %v", parentDir, err)
+	}
+}
+
 func (s *server) handleDeleteLocal(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "..") {
 		http.Error(w, "invalid model name", http.StatusBadRequest)
 		return
 	}
-	modelDir, parentDir, nested := s.findQuantDir(name)
-	if _, err := os.Stat(modelDir); os.IsNotExist(err) {
-		http.Error(w, "model not found", http.StatusNotFound)
-		return
-	}
-	if err := removeAllWritable(modelDir); err != nil {
-		log.Printf("error: delete model %q: %v", name, err)
-		http.Error(w, "failed to delete: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	log.Printf("deleted model %q", name)
 
-	// If nested, remove the parent dir when no more quant subdirs remain.
-	if nested {
-		remaining, _ := os.ReadDir(parentDir)
-		hasQuants := false
-		for _, e := range remaining {
-			if !e.IsDir() {
-				continue
-			}
-			subFiles, _ := os.ReadDir(filepath.Join(parentDir, e.Name()))
-			for _, f := range subFiles {
-				if !f.IsDir() && strings.HasSuffix(f.Name(), ".gguf") && !matchesMmproj(f.Name()) {
-					hasQuants = true
+	// Determine model dir: prefer INI lookup (works for both layouts), fall back
+	// to directory search for models not registered in managed.ini.
+	modelDir := ""
+	fromINI := false
+	if pf, err := s.preset.Load(); err == nil {
+		if sec, ok := pf.Sections[name]; ok {
+			modelDir = iniModelDir(sec)
+			fromINI = true
+		}
+	}
+	if modelDir == "" {
+		// Fallback: search directories (old flat layout or unregistered models).
+		if parents, err := os.ReadDir(s.cfg.ModelsDir); err == nil {
+			for _, p := range parents {
+				if !p.IsDir() {
+					continue
+				}
+				candidate := filepath.Join(s.cfg.ModelsDir, p.Name(), name)
+				if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+					modelDir = candidate
 					break
 				}
 			}
-			if hasQuants {
-				break
-			}
 		}
-		if !hasQuants {
-			if err := removeAllWritable(parentDir); err != nil {
-				log.Printf("warning: could not remove empty parent dir %q: %v", parentDir, err)
-			}
+		if modelDir == "" {
+			modelDir = filepath.Join(s.cfg.ModelsDir, name)
 		}
+	}
+
+	if _, err := os.Stat(modelDir); os.IsNotExist(err) {
+		if !fromINI {
+			http.Error(w, "model not found", http.StatusNotFound)
+			return
+		}
+		// INI section exists but directory already gone — still clean up the INI.
+	} else {
+		if err := removeAllWritable(modelDir); err != nil {
+			log.Printf("error: delete model %q: %v", name, err)
+			http.Error(w, "failed to delete: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("deleted model %q", name)
+		// Remove parent dir if it now has no remaining quant subdirs.
+		parentDir := filepath.Dir(modelDir)
+		s.cleanupEmptyParentDir(parentDir)
 	}
 
 	if err := s.preset.RemoveModel(name); err != nil {
@@ -463,22 +502,22 @@ func (s *server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !req.Force {
-		// Check each quant's destination directory individually (new nested layout:
-		// ModelsDir/basename(repoID)/quantName).
+		// Check each quant's destination directory individually.
+		// New nested layout: ModelsDir/basename(repoID)/quantSubdirName(filename)
 		parentDir := filepath.Join(s.cfg.ModelsDir, filepath.Base(req.RepoID))
 		for _, filename := range req.Filenames {
-			name := modelNameFromFilename(filename)
-			if name == "" {
+			quantDir := quantSubdirName(filename)
+			if quantDir == "" {
 				continue
 			}
-			destDir := filepath.Join(parentDir, name)
+			destDir := filepath.Join(parentDir, quantDir)
 			if _, err := os.Stat(destDir); err == nil {
 				existingRepoID := readModelMeta(parentDir).RepoID
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusConflict)
 				json.NewEncoder(w).Encode(map[string]string{
 					"conflict":       "exists",
-					"modelName":      name,
+					"modelName":      modelNameFromFilename(filename),
 					"existingRepoId": existingRepoID,
 				})
 				return

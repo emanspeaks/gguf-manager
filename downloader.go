@@ -138,6 +138,26 @@ func modelNameFromFilename(filename string) string {
 	return strings.TrimSuffix(base, ".gguf")
 }
 
+// quantSubdirName returns the short quant identifier used as the on-disk subdir name.
+// For subdirectory-organized repos (e.g. "Q4_K_M/model.gguf") it returns the innermost
+// dir component ("Q4_K_M"). For flat repos it extracts the quant suffix via quantSuffixRe
+// (e.g. "Q4_K_M" from "Llama-3-8B-Q4_K_M.gguf"), falling back to the full stem.
+func quantSubdirName(filename string) string {
+	if idx := strings.LastIndex(filename, "/"); idx >= 0 {
+		dir := filename[:idx]
+		if jdx := strings.LastIndex(dir, "/"); jdx >= 0 {
+			dir = dir[jdx+1:]
+		}
+		return dir
+	}
+	base := shardRe.ReplaceAllString(filepath.Base(filename), "")
+	base = strings.TrimSuffix(base, ".gguf")
+	if m := quantSuffixRe.FindStringSubmatch(base); m != nil {
+		return m[1]
+	}
+	return base
+}
+
 // shardPattern returns a glob pattern matching all shards of the given file.
 // For files in subdirectories (subdir-grouped quants) the directory prefix is
 // preserved so the hf CLI receives the correct path (e.g. "Q8_0/Model*.gguf").
@@ -156,30 +176,39 @@ func shardPattern(filename string) string {
 	return dir + base
 }
 
-// findModelFile returns the absolute path of the model file within dir.
-// For sharded patterns (containing "*"), it scans dir for the first shard
-// (-00001-of-) file and falls back to the first .gguf alphabetically.
-// For non-sharded patterns it returns dir/basename(pattern).
+// findModelFile returns the absolute path of the primary model file within dir,
+// walking recursively to handle organized repos where hf preserves subdirectory
+// structure inside the download destination. For sharded patterns it prefers the
+// first shard (-00001-of-); for non-sharded patterns it prefers the exact basename.
 func findModelFile(dir, pattern string) string {
-	if strings.Contains(pattern, "*") {
-		// Find the first-shard file.
-		entries, err := os.ReadDir(dir)
-		if err == nil {
-			for _, e := range entries {
-				if !e.IsDir() && strings.Contains(e.Name(), "-00001-of-") && strings.HasSuffix(e.Name(), ".gguf") {
-					return filepath.Join(dir, e.Name())
-				}
-			}
-			// Fallback: first .gguf alphabetically (ReadDir already sorts).
-			for _, e := range entries {
-				if !e.IsDir() && strings.HasSuffix(e.Name(), ".gguf") && !matchesMmproj(e.Name()) {
-					return filepath.Join(dir, e.Name())
-				}
-			}
+	isSharded := strings.Contains(pattern, "*")
+	baseName := filepath.Base(pattern)
+	var result string
+	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
 		}
-		return dir // last resort
+		name := d.Name()
+		if !strings.HasSuffix(name, ".gguf") || matchesMmproj(name) {
+			return nil
+		}
+		if result == "" {
+			result = path // first .gguf as fallback
+		}
+		if isSharded && strings.Contains(name, "-00001-of-") {
+			result = path
+			return fs.SkipAll
+		}
+		if !isSharded && name == baseName {
+			result = path
+			return fs.SkipAll
+		}
+		return nil
+	})
+	if result != "" {
+		return result
 	}
-	return filepath.Join(dir, filepath.Base(pattern))
+	return filepath.Join(dir, baseName)
 }
 
 func (d *downloader) activeInfo() (string, bool) {
@@ -229,7 +258,8 @@ func (d *downloader) start(repoID string, filenames []string, sidecarFiles []str
 	// Build one job per quant, renaming any existing quant subdir aside.
 	jobs := make([]downloadJob, 0, len(filenames))
 	for _, filename := range filenames {
-		name := modelNameFromFilename(filename)
+		name := modelNameFromFilename(filename) // unique INI section name
+		quantDir := quantSubdirName(filename)   // short on-disk subdir name
 		if name == "" || strings.ContainsAny(name, "/\\") {
 			for _, j := range jobs {
 				if j.oldDir != "" {
@@ -238,7 +268,7 @@ func (d *downloader) start(repoID string, filenames []string, sidecarFiles []str
 			}
 			return fmt.Errorf("could not derive valid model name from filename: %s", filename)
 		}
-		destDir := filepath.Join(parentDir, name)
+		destDir := filepath.Join(parentDir, quantDir)
 		job := downloadJob{
 			filename:  filename,
 			pattern:   shardPattern(filename),

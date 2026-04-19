@@ -216,7 +216,9 @@ func ensureManagedINI(modelsDir string) {
 						continue
 					}
 					modelPath := findFirstShard(quantDir, modelFiles)
-					entries = append(entries, modelEntry{qName, modelPath, mmprojPath})
+					// Section name derived from the model filename for uniqueness across repos.
+					sectionName := modelNameFromFilename(filepath.Base(modelPath))
+					entries = append(entries, modelEntry{sectionName, modelPath, mmprojPath})
 				}
 			} else if len(topModelFiles) > 0 {
 				// Old flat layout: model files sit directly in this directory.
