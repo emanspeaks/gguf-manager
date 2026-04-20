@@ -202,6 +202,56 @@ func (s *server) handleLocal(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Secondary: llamaswap config.yaml entries not already covered by INI.
+	// This ensures models that are registered in config.yaml but absent from
+	// models.ini get their proper name instead of the subdirectory name.
+	if s.llamaSwap != nil {
+		if lsModels, err := s.llamaSwap.ListModels(); err == nil {
+			for _, lsm := range lsModels {
+				if lsm.ModelPath == "" {
+					continue
+				}
+				modelDir := filepath.Dir(lsm.ModelPath)
+				if _, covered := coveredDirs[filepath.Clean(modelDir)]; covered {
+					continue
+				}
+				coveredDirs[filepath.Clean(modelDir)] = struct{}{}
+
+				files, totalSize := scanModelDir(modelDir)
+				_, loaded := loadedModels[lsm.Name]
+
+				repoID := ""
+				parentDir := filepath.Dir(modelDir)
+				if parentDir != s.cfg.ModelsDir && parentDir != modelDir {
+					repoID = readModelMeta(parentDir).RepoID
+					if repoID == "" && len(files) > 0 {
+						repoID = detectRepoIDFromGGUF(modelDir, files)
+						if repoID != "" {
+							_ = writeModelMeta(parentDir, repoID)
+						}
+					}
+				}
+
+				mmprojName := ""
+				if lsm.MmprojPath != "" {
+					mmprojName = filepath.Base(lsm.MmprojPath)
+				}
+
+				models = append(models, localModel{
+					Name:      lsm.Name,
+					Path:      modelDir,
+					SizeBytes: totalSize,
+					Files:     files,
+					Loaded:    loaded,
+					IsVision:  !lsm.IsSD && lsm.MmprojPath != "",
+					Mmproj:    mmprojName,
+					InPreset:  true,
+					RepoID:    repoID,
+				})
+			}
+		}
+	}
+
 	// Fallback: scan directories for models not covered by any INI section.
 	// Handles manually placed models and the old flat layout.
 	if dirEntries, err := os.ReadDir(s.cfg.ModelsDir); err == nil {
@@ -396,8 +446,10 @@ func (s *server) handleDeleteLocal(w http.ResponseWriter, r *http.Request) {
 			log.Printf("warning: failed to remove %s from config.yaml: %v", name, err)
 		}
 	}
-	if err := restartService(s.cfg.LlamaService); err != nil {
-		log.Printf("warning: failed to restart %s: %v", s.cfg.LlamaService, err)
+	if s.llamaSwap == nil || s.cfg.ForceRestartOnLlamaSwap {
+		if err := restartService(s.cfg.LlamaService); err != nil {
+			log.Printf("warning: failed to restart %s: %v", s.cfg.LlamaService, err)
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -740,6 +792,74 @@ func (s *server) handlePutLlamaSwapRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.llamaSwap.WriteRaw(name, strings.TrimRight(string(raw), "\r\n")); err != nil {
+		http.Error(w, "failed to write config.yaml: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// -- llama-swap command templates handlers --
+
+func (s *server) handleGetLlamaSwapTemplates(w http.ResponseWriter, r *http.Request) {
+	if s.llamaSwap == nil {
+		http.Error(w, "llama-swap not configured", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, s.llamaSwap.LoadTemplates())
+}
+
+func (s *server) handlePutLlamaSwapTemplates(w http.ResponseWriter, r *http.Request) {
+	if s.llamaSwap == nil {
+		http.Error(w, "llama-swap not configured", http.StatusNotFound)
+		return
+	}
+	if err := s.llamaSwap.UpdateTemplatesFromJSON(io.LimitReader(r.Body, 64<<10)); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// -- llama-swap group membership handlers --
+
+func (s *server) handleGetLlamaSwapGroups(w http.ResponseWriter, r *http.Request) {
+	if s.llamaSwap == nil {
+		http.Error(w, "llama-swap not configured", http.StatusNotFound)
+		return
+	}
+	name := r.PathValue("name")
+	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "..") {
+		http.Error(w, "invalid model name", http.StatusBadRequest)
+		return
+	}
+	groups, err := s.llamaSwap.ListGroups(name)
+	if err != nil {
+		http.Error(w, "failed to read config.yaml: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if groups == nil {
+		writeJSON(w, []struct{}{})
+		return
+	}
+	writeJSON(w, groups)
+}
+
+func (s *server) handlePutLlamaSwapGroups(w http.ResponseWriter, r *http.Request) {
+	if s.llamaSwap == nil {
+		http.Error(w, "llama-swap not configured", http.StatusNotFound)
+		return
+	}
+	name := r.PathValue("name")
+	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "..") {
+		http.Error(w, "invalid model name", http.StatusBadRequest)
+		return
+	}
+	var groupNames []string
+	if err := json.NewDecoder(r.Body).Decode(&groupNames); err != nil {
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.llamaSwap.SetGroupMembership(name, groupNames); err != nil {
 		http.Error(w, "failed to write config.yaml: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

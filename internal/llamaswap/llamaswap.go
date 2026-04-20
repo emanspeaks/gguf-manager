@@ -55,7 +55,8 @@ func WriteFile(path string, doc *yaml.Node) error {
 // it in the appropriate group (llm or sd). vaePath is the path to ae.safetensors
 // for Stable Diffusion models; it also serves as the signal that the model is an
 // SD model. mmprojPath is the vision projector for multimodal LLMs.
-func AddModel(doc *yaml.Node, name, modelPath, mmprojPath, vaePath string) {
+// tpl supplies the cmd template and TTL defaults.
+func AddModel(doc *yaml.Node, name, modelPath, mmprojPath, vaePath string, tpl Templates) {
 	root := rootMapping(doc)
 
 	models := mappingGet(root, "models")
@@ -66,17 +67,13 @@ func AddModel(doc *yaml.Node, name, modelPath, mmprojPath, vaePath string) {
 
 	sd := isSDModel(name, vaePath)
 	var cmd string
+	var ttl int
 	if sd {
-		cmd = buildSDCmd(modelPath, vaePath)
+		cmd = ApplySDCmd(tpl, modelPath, vaePath)
+		ttl = tpl.SDTtl
 	} else {
-		cmd = buildLLMCmd(modelPath, name, mmprojPath)
-	}
-
-	ttl := 0
-	if sd {
-		ttl = 600
-	} else {
-		ttl = llmTTL(name)
+		cmd = ApplyLLMCmd(tpl, modelPath, name, mmprojPath)
+		ttl = LLMTtlFor(tpl, name)
 	}
 
 	entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
@@ -84,7 +81,7 @@ func AddModel(doc *yaml.Node, name, modelPath, mmprojPath, vaePath string) {
 		Kind:  yaml.ScalarNode,
 		Tag:   "!!str",
 		Value: cmd,
-		Style: yaml.FoldedStyle,
+		Style: yaml.LiteralStyle,
 	})
 	mappingSet(entry, "ttl", &yaml.Node{
 		Kind:  yaml.ScalarNode,
@@ -92,12 +89,24 @@ func AddModel(doc *yaml.Node, name, modelPath, mmprojPath, vaePath string) {
 		Value: strconv.Itoa(ttl),
 	})
 	if sd {
+		checkEndpoint := tpl.SDCheckEndpoint
+		if checkEndpoint == "" {
+			checkEndpoint = DefaultSDCheckEndpoint
+		}
 		mappingSet(entry, "checkEndpoint", &yaml.Node{
 			Kind:  yaml.ScalarNode,
 			Tag:   "!!str",
-			Value: "/health",
+			Value: checkEndpoint,
 		})
 	}
+	modelType := "llm"
+	if sd {
+		modelType = "sd"
+	}
+	meta := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	mappingSet(meta, "model_type", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: modelType})
+	mappingSet(meta, "port", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "${PORT}"})
+	mappingSet(entry, "metadata", meta)
 	mappingSet(models, name, entry)
 
 	groups := mappingGet(root, "groups")
@@ -207,6 +216,139 @@ func WriteModelRaw(doc *yaml.Node, name, body string) error {
 	return nil
 }
 
+// ModelEntry describes a model registered in the config.yaml models section,
+// with paths extracted from the cmd field.
+type ModelEntry struct {
+	Name       string
+	ModelPath  string // from -m flag (LLM) or --diffusion-model flag (SD)
+	MmprojPath string // from --mmproj flag, empty if none
+	IsSD       bool   // true for sd-server entries
+}
+
+// ListModels returns every model entry in the document with its cmd-extracted
+// paths. Entries whose cmd cannot be parsed are silently skipped.
+func ListModels(doc *yaml.Node) []ModelEntry {
+	root := rootMapping(doc)
+	models := mappingGet(root, "models")
+	if models == nil {
+		return nil
+	}
+	var result []ModelEntry
+	for i := 0; i+1 < len(models.Content); i += 2 {
+		name := models.Content[i].Value
+		entry := models.Content[i+1]
+		if entry.Kind != yaml.MappingNode {
+			continue
+		}
+		cmdNode := mappingGet(entry, "cmd")
+		if cmdNode == nil {
+			continue
+		}
+		cmd := cmdNode.Value
+		isSD := strings.Contains(cmd, "sd-server")
+		modelPath := ""
+		if isSD {
+			modelPath = extractCmdFlag(cmd, "--diffusion-model")
+		} else {
+			modelPath = extractCmdFlag(cmd, "-m")
+		}
+		result = append(result, ModelEntry{
+			Name:       name,
+			ModelPath:  modelPath,
+			MmprojPath: extractCmdFlag(cmd, "--mmproj"),
+			IsSD:       isSD,
+		})
+	}
+	return result
+}
+
+// extractCmdFlag finds the value after flag in a cmd string. Handles
+// newline-separated, backslash-continuation, and single-line formats.
+func extractCmdFlag(cmd, flag string) string {
+	// Strip backslash-newline continuations so tokens are adjacent.
+	cmd = strings.ReplaceAll(cmd, "\\\n", " ")
+	cmd = strings.ReplaceAll(cmd, "\\\r\n", " ")
+	tokens := strings.Fields(cmd)
+	for i, t := range tokens {
+		if t == flag && i+1 < len(tokens) {
+			return tokens[i+1]
+		}
+	}
+	return ""
+}
+
+// GroupInfo describes one group entry in the llama-swap config.
+type GroupInfo struct {
+	Name      string `json:"name"`
+	Swap      bool   `json:"swap"`
+	Exclusive bool   `json:"exclusive"`
+	IsMember  bool   `json:"isMember"`
+}
+
+// ListGroups returns every group defined in the document, annotated with
+// whether modelName is currently a member.
+func ListGroups(doc *yaml.Node, modelName string) []GroupInfo {
+	root := rootMapping(doc)
+	groups := mappingGet(root, "groups")
+	if groups == nil {
+		return nil
+	}
+	var result []GroupInfo
+	for i := 0; i+1 < len(groups.Content); i += 2 {
+		name := groups.Content[i].Value
+		group := groups.Content[i+1]
+		if group.Kind != yaml.MappingNode {
+			continue
+		}
+		info := GroupInfo{Name: name}
+		if sv := mappingGet(group, "swap"); sv != nil {
+			info.Swap, _ = strconv.ParseBool(sv.Value)
+		}
+		if ev := mappingGet(group, "exclusive"); ev != nil {
+			info.Exclusive, _ = strconv.ParseBool(ev.Value)
+		}
+		if members := mappingGet(group, "members"); members != nil {
+			info.IsMember = seqContains(members, modelName)
+		}
+		result = append(result, info)
+	}
+	return result
+}
+
+// SetGroupMembership adds modelName to each group in groupNames and removes it
+// from all other groups. Groups not already present in the document are ignored.
+func SetGroupMembership(doc *yaml.Node, modelName string, groupNames []string) {
+	root := rootMapping(doc)
+	groups := mappingGet(root, "groups")
+	if groups == nil {
+		return
+	}
+	wanted := make(map[string]bool, len(groupNames))
+	for _, g := range groupNames {
+		wanted[g] = true
+	}
+	for i := 0; i+1 < len(groups.Content); i += 2 {
+		name := groups.Content[i].Value
+		group := groups.Content[i+1]
+		if group.Kind != yaml.MappingNode {
+			continue
+		}
+		members := mappingGet(group, "members")
+		if members == nil {
+			if !wanted[name] {
+				continue
+			}
+			members = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+			mappingSet(group, "members", members)
+		}
+		if wanted[name] {
+			seqAppend(members, modelName)
+		} else {
+			seqRemove(members, modelName)
+		}
+	}
+}
+
 // --- yaml.Node helpers ---
 
 func rootMapping(doc *yaml.Node) *yaml.Node {
@@ -306,38 +448,6 @@ func llmTTL(name string) int {
 	return 0
 }
 
-// buildLLMCmd builds the llama-server command string for a text or vision LLM.
-// The returned string uses embedded newlines so yaml.v3 serializes it as a
-// folded block scalar (>-), matching the llama-swap config convention.
-func buildLLMCmd(modelPath, name, mmprojPath string) string {
-	parts := []string{
-		"/ai/llama-swap/bin/llama-server --port ${PORT}",
-		"-m " + modelPath,
-	}
-	if mmprojPath != "" {
-		parts = append(parts, "--mmproj "+mmprojPath)
-	}
-	parts = append(parts,
-		"--alias "+name,
-		"--no-webui -ngl 999 --no-mmap --flash-attn --mlock -c 65536 --jinja",
-	)
-	return strings.Join(parts, "\n")
-}
-
-// buildSDCmd builds the sd-server command string for a Stable Diffusion model.
-func buildSDCmd(modelPath, vaePath string) string {
-	parts := []string{
-		"/ai/llama-swap/bin/sd-server",
-		"--listen-ip 127.0.0.1 --listen-port ${PORT}",
-		"--diffusion-model " + modelPath,
-	}
-	if vaePath != "" {
-		parts = append(parts, "--vae "+vaePath)
-	}
-	parts = append(parts, "--threads 16 --fa")
-	return strings.Join(parts, "\n")
-}
-
 // buildDefaultGroup returns a new group mapping node with the correct swap /
 // exclusive defaults for the group type.
 func buildDefaultGroup(sd bool) *yaml.Node {
@@ -361,9 +471,19 @@ func newEmptyDoc() *yaml.Node {
 	strNode := func(v string) *yaml.Node {
 		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v}
 	}
+	boolNode := func(v bool) *yaml.Node {
+		val := "false"
+		if v {
+			val = "true"
+		}
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: val}
+	}
 	mappingSet(root, "healthCheckTimeout", intNode(300))
 	mappingSet(root, "logLevel", strNode("info"))
-	mappingSet(root, "startPort", intNode(5900))
+	mappingSet(root, "startPort", intNode(5901))
+	mappingSet(root, "logToStdout", strNode("both"))
+	mappingSet(root, "globalTTL", intNode(600))
+	mappingSet(root, "sendLoadingState", boolNode(true))
 	doc := &yaml.Node{Kind: yaml.DocumentNode}
 	doc.Content = []*yaml.Node{root}
 	return doc

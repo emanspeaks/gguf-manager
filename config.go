@@ -16,7 +16,8 @@ type Config struct {
 	WarnVramPercent float64           `json:"warnVramPercent"` // % of VRAM; default 80
 	SelfService     string            `json:"selfService"`     // systemd unit for self-restart (empty = disabled)
 	PresetGlobal    map[string]string `json:"presetGlobal"`
-	LlamaSwapConfig string            `json:"llamaSwapConfig"` // path to llama-swap config.yaml; empty = disabled
+	LlamaSwapConfig          string            `json:"llamaSwapConfig"`          // path to llama-swap config.yaml; empty = disabled
+	ForceRestartOnLlamaSwap  bool              `json:"forceRestartOnLlamaSwap"`  // restart service even when llama-swap hot-reload is active
 }
 
 func defaultConfig() Config {
