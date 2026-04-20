@@ -184,7 +184,7 @@ async function deleteModel(name) {
     const resp = await fetch('/api/local/' + encodeURIComponent(name), { method: 'DELETE' });
     if (resp.status === 404) { showErr('local-error', 'Model not found.'); return; }
     if (!resp.ok) throw new Error(await resp.text());
-    setStatusBar('Ready', 'Model deleted, restarting service…', false);
+    setStatusBar('Ready', llamaSwapEnabled ? 'Model deleted' : 'Model deleted, restarting service…', false);
     fetchLocalModels();
   } catch (e) {
     showErr('local-error', 'Delete failed: ' + e.message);
@@ -601,6 +601,7 @@ async function openRawEditModal({ title, subtitle, endpoint, placeholder, succes
       if (!resp.ok) throw new Error(await resp.text());
       closeModal();
       setStatusBar('Ready', successMsg, false);
+      fetchLocalModels();
     } catch (e) {
       setStatusBar('Error', 'Save failed: ' + e.message, false);
       saveBtn.disabled = false;
@@ -616,17 +617,190 @@ async function openRawEditModal({ title, subtitle, endpoint, placeholder, succes
 }
 
 async function openConfigModal(name) {
-  const endpoint = llamaSwapEnabled
-    ? '/api/llamaswap/raw/' + encodeURIComponent(name)
-    : '/api/preset/raw/' + encodeURIComponent(name);
-  const placeholder = llamaSwapEnabled
-    ? 'cmd: >-\n  /ai/llama-swap/bin/llama-server --port ${PORT}\n  -m /path/to/model.gguf\n  --alias ModelName\n  --no-webui -ngl 999 --no-mmap --flash-attn --mlock -c 65536 --jinja\nttl: 0'
-    : '; llama-server preset settings for this model\nmodel = /path/to/model.gguf\nctx-size = 65536';
-  await openRawEditModal({
-    title: 'Config', subtitle: name,
-    endpoint, placeholder,
-    successMsg: 'Config saved for ' + name,
+  if (!llamaSwapEnabled) {
+    await openRawEditModal({
+      title: 'Config', subtitle: name,
+      endpoint: '/api/preset/raw/' + encodeURIComponent(name),
+      placeholder: '; llama-server preset settings for this model\nmodel = /path/to/model.gguf\nctx-size = 65536',
+      successMsg: 'Config saved for ' + name,
+    });
+    return;
+  }
+
+  const encodedName = encodeURIComponent(name);
+  const [rawResult, groupsResult] = await Promise.allSettled([
+    fetch('/api/llamaswap/raw/' + encodedName).then(r => r.ok ? r.text() : ''),
+    fetch('/api/llamaswap/groups/' + encodedName).then(r => r.ok ? r.json() : []),
+  ]);
+  const body = rawResult.status === 'fulfilled' ? rawResult.value : '';
+  const groups = groupsResult.status === 'fulfilled' ? groupsResult.value : [];
+
+  const placeholder = 'cmd: >-\n  /ai/llama-swap/bin/llama-server --port ${PORT}\n  -m /path/to/model.gguf\n  --alias ModelName\n  --no-webui -ngl 999 --no-mmap --flash-attn --mlock -c 65536 --jinja\nttl: 0';
+
+  const groupsHtml = groups.length ? `
+    <div class="modal-groups">
+      <div class="modal-groups-label">Group membership</div>
+      <div class="modal-groups-list">${groups.map(g => {
+        const opts = 'swap: ' + g.swap + ', exclusive: ' + g.exclusive;
+        return '<label class="modal-group-row">'
+          + '<input type="checkbox" class="group-cb" data-group="' + esc(g.name) + '"' + (g.isMember ? ' checked' : '') + '>'
+          + '<span class="group-label-name">' + esc(g.name) + '</span>'
+          + '<span class="group-opts">(' + esc(opts) + ')</span>'
+          + '</label>';
+      }).join('')}</div>
+    </div>` : '';
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-title" id="modal-title">Config <small>${esc(name)}</small></div>
+      <textarea spellcheck="false" placeholder="${esc(placeholder)}">${esc(body)}</textarea>
+      ${groupsHtml}
+      <div class="modal-actions">
+        <button class="btn-secondary" id="modal-cancel">Cancel</button>
+        <button class="btn-primary" id="modal-save">Save</button>
+      </div>
+    </div>
+  `;
+
+  const ta = backdrop.querySelector('textarea');
+
+  function closeModal() {
+    document.body.removeChild(backdrop);
+    document.removeEventListener('keydown', onKey);
+  }
+  function onKey(e) { if (e.key === 'Escape') closeModal(); }
+
+  backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(); });
+  document.addEventListener('keydown', onKey);
+
+  backdrop.querySelector('#modal-save').addEventListener('click', async () => {
+    const saveBtn = backdrop.querySelector('#modal-save');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    try {
+      const rawResp = await fetch('/api/llamaswap/raw/' + encodedName, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'text/plain' },
+        body: ta.value,
+      });
+      if (!rawResp.ok) throw new Error(await rawResp.text());
+
+      if (groups.length) {
+        const checked = [...backdrop.querySelectorAll('.group-cb:checked')].map(cb => cb.dataset.group);
+        const grpResp = await fetch('/api/llamaswap/groups/' + encodedName, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(checked),
+        });
+        if (!grpResp.ok) throw new Error(await grpResp.text());
+      }
+
+      closeModal();
+      setStatusBar('Ready', 'Config saved for ' + name, false);
+      fetchLocalModels();
+    } catch (e) {
+      setStatusBar('Error', 'Save failed: ' + e.message, false);
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+    }
   });
+
+  document.body.appendChild(backdrop);
+  ta.focus();
+  ta.setSelectionRange(0, 0);
+}
+
+async function openTemplatesModal() {
+  document.getElementById('status-menu').classList.remove('open');
+  let tpl = { llmCmd: '', llmTtl: -1, sdCmd: '', sdTtl: 600, sdCheckEndpoint: '${sd-check-endpoint}' };
+  try {
+    const resp = await fetch('/api/llamaswap/templates');
+    if (resp.ok) tpl = await resp.json();
+  } catch (_) {}
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-title" id="modal-title">Edit Command Templates
+        <small>Applied when new models are added to config.yaml</small>
+      </div>
+      <div class="modal-body">
+        <div class="tpl-section">
+          <div class="tpl-section-title">LLM models</div>
+          <textarea class="tpl-textarea" id="tpl-llm-cmd" spellcheck="false">${esc(tpl.llmCmd)}</textarea>
+          <div class="tpl-ph-hint">Placeholders: <code>{{MODEL_PATH}}</code> &nbsp;<code>{{MODEL_NAME}}</code> &nbsp;<code>{{MMPROJ_LINE}}</code> (omitted if no mmproj) &nbsp;<code>${'${PORT}'}</code> (llama-swap runtime)</div>
+          <div class="tpl-ttl-row">
+            <label for="tpl-llm-ttl">Default TTL (s):</label>
+            <input type="number" id="tpl-llm-ttl" value="${tpl.llmTtl}" min="-1">
+            <span class="tpl-ttl-hint">−1 = auto (600 s for &lt;10 B params, 0 otherwise)</span>
+          </div>
+        </div>
+        <div class="tpl-section">
+          <div class="tpl-section-title">SD / Flux models</div>
+          <textarea class="tpl-textarea" id="tpl-sd-cmd" spellcheck="false">${esc(tpl.sdCmd)}</textarea>
+          <div class="tpl-ph-hint">Placeholders: <code>{{MODEL_PATH}}</code> &nbsp;<code>{{VAE_LINE}}</code> (omitted if no VAE) &nbsp;<code>${'${PORT}'}</code> (llama-swap runtime)</div>
+          <div class="tpl-ttl-row">
+            <label for="tpl-sd-ttl">Default TTL (s):</label>
+            <input type="number" id="tpl-sd-ttl" value="${tpl.sdTtl}" min="-1">
+          </div>
+          <div class="tpl-ttl-row">
+            <label for="tpl-sd-check">checkEndpoint:</label>
+            <input type="text" id="tpl-sd-check" value="${esc(tpl.sdCheckEndpoint)}" style="flex:1;padding:4px 8px;background:#0f172a;border:1px solid #334155;border-radius:5px;color:#f1f5f9;font-size:0.825rem;outline:none;font-family:inherit" spellcheck="false">
+            <span class="tpl-ttl-hint">macro or literal path (e.g. <code style="font-size:0.7rem">${'${sd-check-endpoint}'}</code>)</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="modal-cancel">Cancel</button>
+        <button class="btn-primary" id="modal-save">Save</button>
+      </div>
+    </div>
+  `;
+
+  function closeModal() {
+    document.body.removeChild(backdrop);
+    document.removeEventListener('keydown', onKey);
+  }
+  function onKey(e) { if (e.key === 'Escape') closeModal(); }
+
+  backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(); });
+  document.addEventListener('keydown', onKey);
+
+  backdrop.querySelector('#modal-save').addEventListener('click', async () => {
+    const saveBtn = backdrop.querySelector('#modal-save');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    const payload = {
+      llmCmd:          backdrop.querySelector('#tpl-llm-cmd').value,
+      llmTtl:          parseInt(backdrop.querySelector('#tpl-llm-ttl').value, 10) || 0,
+      sdCmd:           backdrop.querySelector('#tpl-sd-cmd').value,
+      sdTtl:           parseInt(backdrop.querySelector('#tpl-sd-ttl').value, 10) || 0,
+      sdCheckEndpoint: backdrop.querySelector('#tpl-sd-check').value,
+    };
+    try {
+      const resp = await fetch('/api/llamaswap/templates', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      closeModal();
+      setStatusBar('Ready', 'Command templates saved', false);
+    } catch (e) {
+      setStatusBar('Error', 'Save failed: ' + e.message, false);
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+    }
+  });
+
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#tpl-llm-cmd').focus();
+  backdrop.querySelector('#tpl-llm-cmd').setSelectionRange(0, 0);
 }
 
 async function openFullConfigModal() {
@@ -673,7 +847,10 @@ async function pollStatus() {
       llamaServiceLabel = s.llamaServiceLabel;
       document.getElementById('restart-btn').textContent = 'Restart ' + llamaServiceLabel;
     }
-    if (s.llamaSwapEnabled != null) llamaSwapEnabled = s.llamaSwapEnabled;
+    if (s.llamaSwapEnabled != null) {
+      llamaSwapEnabled = s.llamaSwapEnabled;
+      document.getElementById('edit-templates-btn').style.display = llamaSwapEnabled ? '' : 'none';
+    }
     el.textContent = llamaServiceLabel + ': ' + (s.llamaReachable ? 'online' : 'offline');
     el.className = 'status-indicator ' + (s.llamaReachable ? 'status-online' : 'status-offline');
     if (s.version) {
@@ -723,6 +900,7 @@ document.getElementById('refresh-btn').addEventListener('click', () => { fetchLo
 document.getElementById('browse-btn').addEventListener('click', browseRepo);
 document.getElementById('restart-btn').addEventListener('click', restartService);
 document.getElementById('edit-config-btn').addEventListener('click', openFullConfigModal);
+document.getElementById('edit-templates-btn').addEventListener('click', openTemplatesModal);
 document.getElementById('restart-self-btn').addEventListener('click', restartSelf);
 document.getElementById('cancel-dl-btn').addEventListener('click', cancelDownload);
 document.getElementById('status-menu').addEventListener('click', (e) => e.stopPropagation());

@@ -1,7 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/emanspeaks/w84ggufman/internal/llamaswap"
 )
@@ -27,12 +31,51 @@ func newLlamaSwapManager(cfg Config) *llamaSwapManager {
 // Stable Diffusion models; it also serves as the signal that the model is SD.
 // mmprojPath is the vision projector for multimodal LLMs.
 func (m *llamaSwapManager) AddModel(name, modelPath, mmprojPath, vaePath string) error {
+	tpl := m.LoadTemplates()
 	doc, err := llamaswap.LoadFile(m.path)
 	if err != nil {
 		return err
 	}
-	llamaswap.AddModel(doc, name, modelPath, mmprojPath, vaePath)
+	llamaswap.AddModel(doc, name, modelPath, mmprojPath, vaePath, tpl)
 	return llamaswap.WriteFile(m.path, doc)
+}
+
+// templatesPath returns the path to the JSON templates file stored alongside
+// config.yaml.
+func (m *llamaSwapManager) templatesPath() string {
+	return filepath.Join(filepath.Dir(m.path), "w84ggufman-templates.json")
+}
+
+// LoadTemplates reads the templates file, returning defaults if not found or
+// unreadable.
+func (m *llamaSwapManager) LoadTemplates() llamaswap.Templates {
+	data, err := os.ReadFile(m.templatesPath())
+	if err != nil {
+		return llamaswap.DefaultTemplates()
+	}
+	var tpl llamaswap.Templates
+	if err := json.Unmarshal(data, &tpl); err != nil {
+		return llamaswap.DefaultTemplates()
+	}
+	return tpl
+}
+
+// SaveTemplates writes the templates file.
+func (m *llamaSwapManager) SaveTemplates(tpl llamaswap.Templates) error {
+	data, err := json.MarshalIndent(tpl, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(m.templatesPath(), data, 0664)
+}
+
+// UpdateTemplatesFromJSON parses JSON from r and saves the templates file.
+func (m *llamaSwapManager) UpdateTemplatesFromJSON(r io.Reader) error {
+	var tpl llamaswap.Templates
+	if err := json.NewDecoder(r).Decode(&tpl); err != nil {
+		return fmt.Errorf("invalid templates JSON: %w", err)
+	}
+	return m.SaveTemplates(tpl)
 }
 
 // RemoveModel removes a model entry from config.yaml and from all group
@@ -75,6 +118,34 @@ func (m *llamaSwapManager) WriteRaw(name, body string) error {
 	if err := llamaswap.WriteModelRaw(doc, name, body); err != nil {
 		return err
 	}
+	return llamaswap.WriteFile(m.path, doc)
+}
+
+// ListModels returns all model entries in config.yaml with their cmd-extracted paths.
+func (m *llamaSwapManager) ListModels() ([]llamaswap.ModelEntry, error) {
+	doc, err := llamaswap.LoadFile(m.path)
+	if err != nil {
+		return nil, err
+	}
+	return llamaswap.ListModels(doc), nil
+}
+
+// ListGroups returns all groups in config.yaml annotated with membership for modelName.
+func (m *llamaSwapManager) ListGroups(modelName string) ([]llamaswap.GroupInfo, error) {
+	doc, err := llamaswap.LoadFile(m.path)
+	if err != nil {
+		return nil, err
+	}
+	return llamaswap.ListGroups(doc, modelName), nil
+}
+
+// SetGroupMembership updates group membership for modelName and saves the file.
+func (m *llamaSwapManager) SetGroupMembership(modelName string, groupNames []string) error {
+	doc, err := llamaswap.LoadFile(m.path)
+	if err != nil {
+		return err
+	}
+	llamaswap.SetGroupMembership(doc, modelName, groupNames)
 	return llamaswap.WriteFile(m.path, doc)
 }
 

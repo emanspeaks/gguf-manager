@@ -550,11 +550,15 @@ func (d *downloader) run(ctx context.Context, repoID string, jobs []downloadJob,
 	}
 
 	log.Printf("download complete: %d quant(s) from %s", len(jobs), repoID)
-	d.appendLine("[w84ggufman] download complete, restarting service...")
-	if err := restartService(d.cfg.LlamaService); err != nil {
-		d.appendLine(fmt.Sprintf("[w84ggufman] warning: failed to restart service: %v", err))
+	if d.llamaSwap != nil && !d.cfg.ForceRestartOnLlamaSwap {
+		d.appendLine("[w84ggufman] download complete — llama-swap will hot-reload config.yaml")
 	} else {
-		d.appendLine("[w84ggufman] service restarted successfully")
+		d.appendLine("[w84ggufman] download complete, restarting service...")
+		if err := restartService(d.cfg.LlamaService); err != nil {
+			d.appendLine(fmt.Sprintf("[w84ggufman] warning: failed to restart service: %v", err))
+		} else {
+			d.appendLine("[w84ggufman] service restarted successfully")
+		}
 	}
 
 	d.mu.Lock()
