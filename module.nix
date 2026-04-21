@@ -147,7 +147,8 @@ in {
 
     systemd.services.w84ggufman = {
       description = "w84ggufman — local GGUF model management UI";
-      after       = [ "network.target" cfg.llamaService ];
+      wants       = [ "network-online.target" ];
+      after       = [ "network-online.target" cfg.llamaService ];
       wantedBy    = [ "multi-user.target" ];
 
       path = [ pkgs.python3Packages.huggingface-hub ];
