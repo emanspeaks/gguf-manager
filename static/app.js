@@ -14,6 +14,7 @@ import { fetchLocalModels } from './modules/local-models.js';
 import { pollStatus, setupStatusPolling, llamaSwapEnabled } from './modules/status-polling.js';
 import { cancelDownload } from './modules/download.js';
 import { openFullConfigModal, openTemplatesModal } from './modules/config-modal.js';
+import { openDiskTreemap } from './modules/disk-treemap.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INITIALIZATION
@@ -44,6 +45,10 @@ document.getElementById('edit-templates-btn').addEventListener('click', () => {
 });
 
 document.getElementById('cancel-dl-btn').addEventListener('click', cancelDownload);
+
+document.getElementById('disk-info').addEventListener('click', () => {
+  openDiskTreemap().catch(console.error);
+});
 
 // Initial data fetch
 fetchLocalModels();

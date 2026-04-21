@@ -421,6 +421,100 @@ html.light #status-bar-chevron { color: #cbd5e1; }
 .resource-bar-fill.crit { background: #ef4444; }
 html.light .resource-meter { border-color: #cbd5e1; background: #f8fafc; }
 html.light .resource-bar { background: #e2e8f0; }
+#disk-info { cursor: pointer; }
+#disk-info:hover { border-color: #3b82f6; }
+/* ── Disk usage treemap (non-modal floating dialog) ─────────────────────── */
+.disk-treemap-dialog {
+  position: fixed;
+  right: 24px;
+  top: 80px;
+  width: min(720px, 90vw);
+  height: min(520px, 80vh);
+  min-width: 320px;
+  min-height: 200px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.55);
+  display: flex;
+  flex-direction: column;
+  z-index: 400;
+  resize: both;
+  overflow: hidden;
+}
+.dtm-header {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 8px 10px 8px 12px;
+  background: #1e293b;
+  border-bottom: 1px solid #334155;
+  cursor: move;
+  user-select: none;
+  flex-shrink: 0;
+}
+.dtm-title { font-size: 0.82rem; font-weight: 600; color: #f1f5f9; }
+.dtm-summary { font-size: 0.72rem; color: #94a3b8; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dtm-close {
+  background: transparent; color: #94a3b8; border: none;
+  font-size: 1.1rem; line-height: 1; padding: 2px 8px;
+  cursor: pointer; border-radius: 4px;
+}
+.dtm-close:hover { background: #334155; color: #f1f5f9; }
+.dtm-body {
+  position: relative;
+  flex: 1; min-height: 0;
+  background: #0b1220;
+  overflow: hidden;
+}
+.dtm-block {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid rgba(0,0,0,0.4);
+  overflow: hidden;
+  color: #f1f5f9;
+  font-size: 0.68rem;
+  padding: 3px 5px;
+  display: flex; flex-direction: column; justify-content: flex-start;
+  cursor: default;
+  transition: filter 0.1s;
+}
+.dtm-block:hover { filter: brightness(1.2); }
+.dtm-block-free { color: #94a3b8; background: #1e293b !important; }
+.dtm-label {
+  font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+}
+.dtm-size {
+  font-size: 0.62rem;
+  opacity: 0.85;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+}
+.dtm-tooltip {
+  position: absolute;
+  background: rgba(15,23,42,0.95);
+  color: #f1f5f9;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  font-family: 'Menlo','Consolas',monospace;
+  pointer-events: none;
+  z-index: 2;
+  max-width: 80%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html.light .disk-treemap-dialog { background: #f8fafc; border-color: #e2e8f0; box-shadow: 0 8px 32px rgba(0,0,0,0.15); }
+html.light .dtm-header { background: #e2e8f0; border-bottom-color: #cbd5e1; }
+html.light .dtm-title { color: #1e293b; }
+html.light .dtm-summary { color: #64748b; }
+html.light .dtm-close { color: #64748b; }
+html.light .dtm-close:hover { background: #cbd5e1; color: #0f172a; }
+html.light .dtm-body { background: #ffffff; }
+html.light .dtm-block-free { background: #e2e8f0 !important; color: #64748b; }
+html.light .dtm-tooltip { background: rgba(248,250,252,0.95); color: #0f172a; border-color: #cbd5e1; }
 /* ── Vision & preset badges ──────────────────────────────────────────────── */
 .badge-vision      { background: #1e3a5f; color: #7dd3fc; }
 .badge-warn-preset { background: #7c2d12; color: #fdba74; }
