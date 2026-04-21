@@ -1,24 +1,24 @@
-// Non-modal disk-usage treemap dialog
+// Non-modal disk-usage treemap dialog — directory-grouped hierarchical layout
 
 import { esc, formatBytes } from './utils.js';
+
+const DIR_HEADER = 18;  // px reserved for directory label bar
+const DIR_PAD = 2;      // px inset on sides/bottom within a dir box
 
 let dialogEl = null;
 let dialogCleanup = null;
 
+// ── Public API ─────────────────────────────────────────────────────────────
+
 export async function openDiskTreemap() {
-  if (dialogEl) {
-    dialogEl.classList.add('focused');
-    return;
-  }
+  if (dialogEl) { dialogEl.style.zIndex = '401'; return; }
 
   let data;
   try {
     const resp = await fetch('/api/disk-usage');
     if (!resp.ok) throw new Error('fetch failed');
     data = await resp.json();
-  } catch (e) {
-    return;
-  }
+  } catch (e) { return; }
 
   dialogEl = document.createElement('div');
   dialogEl.className = 'disk-treemap-dialog';
@@ -29,29 +29,41 @@ export async function openDiskTreemap() {
       <button class="dtm-close" title="Close">×</button>
     </div>
     <div class="dtm-body"></div>
-    <div class="dtm-tooltip" style="display:none"></div>
+    <div class="dtm-statusbar">
+      <span class="dtm-hover-path"></span>
+      <span class="dtm-legend"></span>
+    </div>
   `;
 
-  const summary = dialogEl.querySelector('.dtm-summary');
-  summary.textContent =
+  dialogEl.querySelector('.dtm-summary').textContent =
     formatBytes(data.usedBytes) + ' used / ' + formatBytes(data.totalBytes) +
-    ' (' + formatBytes(data.freeBytes) + ' free, ' +
-    formatBytes(data.modelsDirBytes) + ' in models)';
+    ' (' + formatBytes(data.freeBytes) + ' free, ' + formatBytes(data.modelsDirBytes) + ' in models)';
 
   dialogEl.querySelector('.dtm-close').addEventListener('click', closeDiskTreemap);
 
-  const detachDrag = setupDragAndResize(dialogEl);
-
+  const onDocClick = () => removeMenu();
+  document.addEventListener('click', onDocClick);
+  const detachDrag = setupDrag(dialogEl);
   document.body.appendChild(dialogEl);
 
-  const items = buildItems(data);
   const body = dialogEl.querySelector('.dtm-body');
-  const tooltip = dialogEl.querySelector('.dtm-tooltip');
+  const hoverPathEl = dialogEl.querySelector('.dtm-hover-path');
+  const legendEl = dialogEl.querySelector('.dtm-legend');
+  const state = { data, dirElMap: new Map(), hoverPathEl };
 
   function render() {
-    renderTreemap(body, items, tooltip);
+    removeMenu();
+    body.innerHTML = '';
+    state.dirElMap.clear();
+    const w = body.clientWidth, h = body.clientHeight;
+    if (w > 0 && h > 0) {
+      const tree = buildTree(state.data);
+      buildLegend(legendEl, tree, state.data);
+      layoutChildren(body, tree.children, 0, 0, w, h, state);
+    }
   }
 
+  state.render = render;
   render();
   const ro = new ResizeObserver(render);
   ro.observe(body);
@@ -59,193 +71,363 @@ export async function openDiskTreemap() {
   dialogCleanup = () => {
     ro.disconnect();
     detachDrag();
+    document.removeEventListener('click', onDocClick);
   };
 }
 
 export function closeDiskTreemap() {
   if (!dialogEl) return;
   if (dialogCleanup) { dialogCleanup(); dialogCleanup = null; }
+  removeMenu();
   dialogEl.remove();
   dialogEl = null;
 }
 
-function buildItems(data) {
-  const items = [];
-  items.push({ kind: 'free', label: 'Free space', size: data.freeBytes });
-  if (data.systemBytes > 0) {
-    items.push({ kind: 'system', label: '(System files)', size: data.systemBytes });
+// ── Tree building ──────────────────────────────────────────────────────────
+
+function buildTree(data) {
+  const dirMap = new Map();
+  const modelsRoot = {
+    name: pathBasename(data.modelsDir), path: '', size: 0,
+    kind: 'modelsRoot', children: [], topLevel: '',
+  };
+  dirMap.set('', modelsRoot);
+
+  function ensureDir(relPath) {
+    if (dirMap.has(relPath)) return dirMap.get(relPath);
+    const parts = relPath.split('/');
+    const parentPath = parts.slice(0, -1).join('/');
+    const parent = ensureDir(parentPath);
+    const node = {
+      name: parts[parts.length - 1], path: relPath, size: 0,
+      kind: 'dir', children: [], topLevel: parts[0],
+    };
+    parent.children.push(node);
+    dirMap.set(relPath, node);
+    return node;
   }
+
   for (const f of data.files) {
     if (!f.size || f.size <= 0) continue;
-    items.push({ kind: 'file', label: f.path, size: f.size });
+    const parts = f.path.split('/');
+    const dir = ensureDir(parts.slice(0, -1).join('/'));
+    dir.children.push({
+      name: parts[parts.length - 1], path: f.path, size: f.size,
+      kind: 'file', children: [], topLevel: parts[0],
+    });
   }
-  items.sort((a, b) => b.size - a.size);
-  return items;
+
+  function calcSize(node) {
+    if (node.kind === 'file') return node.size;
+    node.size = node.children.reduce((s, c) => s + calcSize(c), 0);
+    return node.size;
+  }
+  calcSize(modelsRoot);
+
+  function sortTree(node) {
+    node.children.sort((a, b) => b.size - a.size);
+    node.children.forEach(c => sortTree(c));
+  }
+  sortTree(modelsRoot);
+
+  const extras = [];
+  if (data.systemBytes > 0) extras.push({ name: 'System files', path: '__system__', size: data.systemBytes, kind: 'system', children: [] });
+  if (data.freeBytes > 0)   extras.push({ name: 'Free space',   path: '__free__',   size: data.freeBytes,   kind: 'free',   children: [] });
+  const rootChildren = [...extras, modelsRoot].sort((a, b) => b.size - a.size);
+  return { kind: 'root', size: data.totalBytes, children: rootChildren };
 }
 
-function colorFor(item) {
-  if (item.kind === 'free') return '#1e293b';
-  if (item.kind === 'system') return '#475569';
-  // File: color by top-level path segment
-  const seg = item.label.split('/')[0] || item.label;
-  let h = 0;
-  for (let i = 0; i < seg.length; i++) h = (h * 31 + seg.charCodeAt(i)) >>> 0;
-  const hue = h % 360;
-  return `hsl(${hue}, 55%, 40%)`;
+function pathBasename(p) {
+  if (!p) return 'models';
+  const s = p.replace(/[/\\]+$/, '');
+  return s.slice(Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\')) + 1) || s;
 }
 
-function renderTreemap(container, items, tooltip) {
-  container.innerHTML = '';
-  const w = container.clientWidth;
-  const h = container.clientHeight;
-  if (w <= 0 || h <= 0 || items.length === 0) return;
+// ── Layout + render ────────────────────────────────────────────────────────
 
-  const total = items.reduce((s, it) => s + it.size, 0);
+function layoutChildren(container, children, x, y, w, h, state) {
+  const items = children.filter(c => c.size > 0);
+  if (!items.length || w < 2 || h < 2) return;
+  const total = items.reduce((s, c) => s + c.size, 0);
   if (total <= 0) return;
-
-  const rects = squarify(items, 0, 0, w, h, total);
-
-  for (const r of rects) {
-    const el = document.createElement('div');
-    el.className = 'dtm-block dtm-block-' + r.item.kind;
-    el.style.left = r.x + 'px';
-    el.style.top = r.y + 'px';
-    el.style.width = r.w + 'px';
-    el.style.height = r.h + 'px';
-    el.style.background = colorFor(r.item);
-    const showLabel = r.w >= 60 && r.h >= 22;
-    if (showLabel) {
-      const shortLabel = r.item.label.split('/').pop();
-      el.innerHTML =
-        `<span class="dtm-label">${esc(shortLabel)}</span>` +
-        `<span class="dtm-size">${esc(formatBytes(r.item.size))}</span>`;
-    }
-    el.addEventListener('mousemove', (ev) => {
-      tooltip.style.display = 'block';
-      tooltip.textContent = r.item.label + ' — ' + formatBytes(r.item.size);
-      const rect = container.getBoundingClientRect();
-      let tx = ev.clientX - rect.left + 12;
-      let ty = ev.clientY - rect.top + 12;
-      const maxX = container.clientWidth - tooltip.offsetWidth - 4;
-      const maxY = container.clientHeight - tooltip.offsetHeight - 4;
-      if (tx > maxX) tx = maxX;
-      if (ty > maxY) ty = maxY;
-      tooltip.style.left = tx + 'px';
-      tooltip.style.top = ty + 'px';
-    });
-    el.addEventListener('mouseleave', () => {
-      tooltip.style.display = 'none';
-    });
-    container.appendChild(el);
+  const scale = (w * h) / total;
+  for (const r of squarify(items, scale, x, y, w, h)) {
+    renderNode(container, r.node, r.x, r.y, r.w, r.h, state);
   }
 }
 
-// Squarified treemap (Bruls, Huijsen, van Wijk).
-// items: sorted desc by size. Returns array of {item, x, y, w, h}.
-function squarify(items, x, y, w, h, totalSize) {
-  const results = [];
-  const remaining = items.slice();
-  // Scale factor: pixel area per byte
-  const scale = (w * h) / totalSize;
-  const values = remaining.map((it) => it.size * scale);
+function renderNode(container, node, x, y, w, h, state) {
+  if (w < 2 || h < 2) return;
+  const { kind } = node;
 
-  layoutLoop(values, remaining, { x, y, w, h }, results);
-  return results;
+  if (kind === 'free' || kind === 'system') {
+    const el = makeDiv(x, y, w, h, 'dtm-block dtm-block-' + kind);
+    if (w >= 40 && h >= 16) el.innerHTML =
+      `<span class="dtm-label">${esc(node.name)}</span><span class="dtm-size">${esc(formatBytes(node.size))}</span>`;
+    el.addEventListener('mouseenter', () => { state.hoverPathEl.textContent = node.name + '  —  ' + formatBytes(node.size); });
+    el.addEventListener('mouseleave', () => { state.hoverPathEl.textContent = ''; });
+    container.appendChild(el);
+    return;
+  }
+
+  if (kind === 'file') {
+    const el = makeDiv(x, y, w, h, 'dtm-block dtm-block-file');
+    el.style.background = fileColor(node.topLevel);
+    if (w >= 54 && h >= 22) el.innerHTML =
+      `<span class="dtm-label">${esc(node.name)}</span><span class="dtm-size">${esc(formatBytes(node.size))}</span>`;
+    el.addEventListener('mouseenter', () => onFileEnter(node, state));
+    el.addEventListener('mouseleave', () => onFileLeave(node, state));
+    el.addEventListener('click',       e => { e.stopPropagation(); showMenu(e, node, state); });
+    el.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); showMenu(e, node, state); });
+    container.appendChild(el);
+    return;
+  }
+
+  // dir or modelsRoot: draw the container box, then recurse into children
+  const isModels = kind === 'modelsRoot';
+  const border = isModels ? '#334155' : dirBorderColor(node.topLevel);
+  const headerBg = isModels ? '#1a2840'  : dirHeaderColor(node.topLevel);
+
+  const el = document.createElement('div');
+  el.className = isModels ? 'dtm-dir dtm-dir-models' : 'dtm-dir';
+  el.style.cssText = `position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;` +
+    `border-color:${border};box-sizing:border-box;`;
+  el.dataset.path = node.path;
+  state.dirElMap.set(node.path, el);
+  el.addEventListener('mouseenter', () => { state.hoverPathEl.textContent = node.name + '  —  ' + formatBytes(node.size); });
+  el.addEventListener('mouseleave', () => { state.hoverPathEl.textContent = ''; });
+  container.appendChild(el);
+
+  const hasHeader = h > DIR_HEADER + 4;
+  if (hasHeader && w >= 8) {
+    const hdr = document.createElement('div');
+    hdr.className = 'dtm-dir-hdr';
+    hdr.style.background = headerBg;
+    if (w >= 24) hdr.textContent = node.name;
+    el.appendChild(hdr);
+  }
+
+  const innerX = x + DIR_PAD;
+  const innerY = y + (hasHeader ? DIR_HEADER : DIR_PAD);
+  const innerW = w - DIR_PAD * 2;
+  const innerH = h - (hasHeader ? DIR_HEADER : DIR_PAD) - DIR_PAD;
+  layoutChildren(container, node.children, innerX, innerY, innerW, innerH, state);
 }
 
-function layoutLoop(values, items, rect, results) {
+function makeDiv(x, y, w, h, cls) {
+  const el = document.createElement('div');
+  el.className = cls;
+  el.style.cssText = `left:${x}px;top:${y}px;width:${w}px;height:${h}px;`;
+  return el;
+}
+
+// ── Squarified treemap ─────────────────────────────────────────────────────
+
+function squarify(nodes, scale, x, y, w, h) {
+  const results = [];
+  const rect = { x, y, w, h };
   let i = 0;
-  while (i < values.length) {
+  while (i < nodes.length) {
     const shorter = Math.min(rect.w, rect.h);
-    const row = [values[i]];
-    const rowItems = [items[i]];
+    if (shorter <= 0) break;
+    const row = [nodes[i].size * scale];
+    const rowN = [nodes[i]];
+    let best = worstAR(row, shorter);
     let j = i + 1;
-    let bestWorst = worst(row, shorter);
-    while (j < values.length) {
-      row.push(values[j]);
-      const candWorst = worst(row, shorter);
-      if (candWorst > bestWorst) {
-        row.pop();
-        break;
-      }
-      rowItems.push(items[j]);
-      bestWorst = candWorst;
+    while (j < nodes.length) {
+      const next = nodes[j].size * scale;
+      row.push(next);
+      const cand = worstAR(row, shorter);
+      if (cand > best) { row.pop(); break; }
+      rowN.push(nodes[j]);
+      best = cand;
       j++;
     }
-    const rowSum = row.reduce((s, v) => s + v, 0);
+    const sum = row.reduce((s, v) => s + v, 0);
+    if (sum <= 0) { i = j; continue; }
     if (rect.w >= rect.h) {
-      // lay out row as a column on the left
-      const colW = rowSum / rect.h;
+      const cw = sum / rect.h;
       let yy = rect.y;
       for (let k = 0; k < row.length; k++) {
-        const hh = row[k] / colW;
-        results.push({ item: rowItems[k], x: rect.x, y: yy, w: colW, h: hh });
-        yy += hh;
+        results.push({ node: rowN[k], x: rect.x, y: yy, w: cw, h: row[k] / cw });
+        yy += row[k] / cw;
       }
-      rect.x += colW;
-      rect.w -= colW;
+      rect.x += cw; rect.w -= cw;
     } else {
-      // lay out row as a row on the top
-      const rowH = rowSum / rect.w;
+      const rh = sum / rect.w;
       let xx = rect.x;
       for (let k = 0; k < row.length; k++) {
-        const ww = row[k] / rowH;
-        results.push({ item: rowItems[k], x: xx, y: rect.y, w: ww, h: rowH });
-        xx += ww;
+        results.push({ node: rowN[k], x: xx, y: rect.y, w: row[k] / rh, h: rh });
+        xx += row[k] / rh;
       }
-      rect.y += rowH;
-      rect.h -= rowH;
+      rect.y += rh; rect.h -= rh;
     }
     i = j;
   }
+  return results;
 }
 
-function worst(row, shorter) {
-  let rmax = -Infinity;
-  let rmin = Infinity;
-  let sum = 0;
-  for (const v of row) {
-    if (v > rmax) rmax = v;
-    if (v < rmin) rmin = v;
-    sum += v;
-  }
-  const s2 = shorter * shorter;
-  const sum2 = sum * sum;
+function worstAR(row, shorter) {
+  let rmax = -Infinity, rmin = Infinity, sum = 0;
+  for (const v of row) { if (v > rmax) rmax = v; if (v < rmin) rmin = v; sum += v; }
+  if (sum <= 0 || shorter <= 0) return Infinity;
+  const s2 = shorter * shorter, sum2 = sum * sum;
   return Math.max((s2 * rmax) / sum2, sum2 / (s2 * rmin));
 }
 
-function setupDragAndResize(dlg) {
+// ── Colors ─────────────────────────────────────────────────────────────────
+// Hue is derived from the top-level directory name (org or standalone repo).
+// All files in the same top-level dir share a hue family:
+//   • file blocks:   hsl(H, 55%, 40%)  — vivid fill
+//   • dir headers:   hsl(H, 40%, 22%)  — dark tinted background strip
+//   • dir borders:   hsl(H, 60%, 55%)  — bright outline
+
+function hueOf(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+
+function fileColor(topLevel) {
+  if (!topLevel) return 'hsl(210,50%,38%)';
+  return `hsl(${hueOf(topLevel)},55%,40%)`;
+}
+function dirHeaderColor(topLevel) {
+  if (!topLevel) return '#162032';
+  return `hsl(${hueOf(topLevel)},40%,22%)`;
+}
+function dirBorderColor(topLevel) {
+  if (!topLevel) return '#475569';
+  return `hsl(${hueOf(topLevel)},60%,55%)`;
+}
+
+// ── Hover + ancestor highlight ─────────────────────────────────────────────
+
+function onFileEnter(node, state) {
+  state.hoverPathEl.textContent = node.path + '  —  ' + formatBytes(node.size);
+  const parts = node.path.split('/');
+  parts.pop();
+  state.dirElMap.get('')?.classList.add('dtm-dir--hover'); // modelsRoot
+  let cur = '';
+  for (const seg of parts) {
+    cur = cur ? cur + '/' + seg : seg;
+    state.dirElMap.get(cur)?.classList.add('dtm-dir--hover');
+  }
+}
+
+function onFileLeave(node, state) {
+  state.hoverPathEl.textContent = '';
+  state.dirElMap.forEach(el => el.classList.remove('dtm-dir--hover'));
+}
+
+// ── Context menu ───────────────────────────────────────────────────────────
+
+let menuEl = null;
+
+function removeMenu() {
+  if (menuEl) { menuEl.remove(); menuEl = null; }
+}
+
+function showMenu(e, node, state) {
+  removeMenu();
+  menuEl = document.createElement('div');
+  menuEl.className = 'dtm-menu';
+  const del = document.createElement('button');
+  del.className = 'dtm-menu-item';
+  del.textContent = 'Delete file…';
+  del.addEventListener('click', async ev => {
+    ev.stopPropagation();
+    removeMenu();
+    if (!window.confirm('Delete ' + node.name + '?\n\nThis cannot be undone.')) return;
+    await deleteFile(node, state);
+  });
+  menuEl.appendChild(del);
+  document.body.appendChild(menuEl);
+  const mw = menuEl.offsetWidth, mh = menuEl.offsetHeight;
+  let mx = e.clientX, my = e.clientY;
+  if (mx + mw > window.innerWidth - 4)  mx = e.clientX - mw;
+  if (my + mh > window.innerHeight - 4) my = e.clientY - mh;
+  menuEl.style.left = mx + 'px';
+  menuEl.style.top  = my + 'px';
+}
+
+async function deleteFile(node, state) {
+  const parts = node.path.split('/');
+  const filename = parts.pop();
+  const repoId = parts.length > 0 ? parts.join('/') : '.';
+  try {
+    const resp = await fetch('/api/local/delete-files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repoId, files: [filename] }),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const r2 = await fetch('/api/disk-usage');
+    if (r2.ok) state.data = await r2.json();
+    state.render();
+  } catch (err) {
+    console.error('delete failed:', err);
+  }
+}
+
+// ── Legend ─────────────────────────────────────────────────────────────────
+
+function buildLegend(el, tree, data) {
+  el.innerHTML = '';
+
+  const label = document.createElement('span');
+  label.className = 'dtm-legend-label';
+  label.textContent = 'Color = top-level dir:';
+  el.appendChild(label);
+
+  const modelsRoot = tree.children.find(c => c.kind === 'modelsRoot');
+  const topDirs = modelsRoot ? modelsRoot.children.filter(c => c.kind === 'dir').slice(0, 8) : [];
+  for (const d of topDirs) {
+    const item = document.createElement('span');
+    item.className = 'dtm-legend-item';
+    item.innerHTML = `<span class="dtm-legend-swatch" style="background:${fileColor(d.topLevel)}"></span>${esc(d.name)}`;
+    el.appendChild(item);
+  }
+  if (data.systemBytes > 0) {
+    const item = document.createElement('span');
+    item.className = 'dtm-legend-item';
+    item.innerHTML = `<span class="dtm-legend-swatch" style="background:#475569"></span>System`;
+    el.appendChild(item);
+  }
+  if (data.freeBytes > 0) {
+    const item = document.createElement('span');
+    item.className = 'dtm-legend-item';
+    item.innerHTML = `<span class="dtm-legend-swatch dtm-legend-swatch-free"></span>Free`;
+    el.appendChild(item);
+  }
+}
+
+// ── Drag ───────────────────────────────────────────────────────────────────
+
+function setupDrag(dlg) {
   const header = dlg.querySelector('.dtm-header');
-  let dragging = false;
-  let startX = 0, startY = 0, startLeft = 0, startTop = 0;
+  let dragging = false, startX = 0, startY = 0, startL = 0, startT = 0;
   function onDown(e) {
     if (e.target.classList.contains('dtm-close')) return;
     dragging = true;
-    const rect = dlg.getBoundingClientRect();
-    startX = e.clientX;
-    startY = e.clientY;
-    startLeft = rect.left;
-    startTop = rect.top;
-    dlg.style.left = startLeft + 'px';
-    dlg.style.top = startTop + 'px';
-    dlg.style.right = 'auto';
-    dlg.style.bottom = 'auto';
+    const r = dlg.getBoundingClientRect();
+    startX = e.clientX; startY = e.clientY; startL = r.left; startT = r.top;
+    dlg.style.left = startL + 'px'; dlg.style.top = startT + 'px';
+    dlg.style.right = 'auto'; dlg.style.bottom = 'auto';
     e.preventDefault();
   }
   function onMove(e) {
     if (!dragging) return;
-    const nx = startLeft + (e.clientX - startX);
-    const ny = startTop + (e.clientY - startY);
-    dlg.style.left = Math.max(0, Math.min(window.innerWidth - 80, nx)) + 'px';
-    dlg.style.top = Math.max(0, Math.min(window.innerHeight - 40, ny)) + 'px';
+    dlg.style.left = Math.max(0, Math.min(window.innerWidth  - 80, startL + e.clientX - startX)) + 'px';
+    dlg.style.top  = Math.max(0, Math.min(window.innerHeight - 40, startT + e.clientY - startY)) + 'px';
   }
   function onUp() { dragging = false; }
   header.addEventListener('mousedown', onDown);
   document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
+  document.addEventListener('mouseup',   onUp);
   return () => {
     header.removeEventListener('mousedown', onDown);
     document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
+    document.removeEventListener('mouseup',   onUp);
   };
 }

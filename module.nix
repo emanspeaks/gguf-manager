@@ -17,6 +17,7 @@ let
     vramGiB           = cfg.vramGiB;
     warnVramPercent   = cfg.warnVramPercent;
     llamaSwapConfig   = cfg.llamaSwapConfig;
+    atopwebURL        = cfg.atopwebURL;
   });
 in {
   options.services.w84ggufman = {
@@ -108,6 +109,21 @@ in {
       '';
     };
 
+    atopwebURL = lib.mkOption {
+      type    = lib.types.str;
+      default = "http://localhost:5899";
+      description = ''
+        Base URL of an atopweb instance to use for GPU VRAM monitoring.
+        When reachable, w84ggufman queries <atopwebURL>/api/vram on every
+        status poll instead of using system-level detection (nvidia-smi, sysfs,
+        etc.). Clicking the VRAM meter in the UI opens this URL in a new tab.
+        Set to "" to disable atopweb integration and always use system detection.
+
+        When services.atopweb.enable is true the URL is derived automatically
+        from that service's listen address; you do not need to set this manually.
+      '';
+    };
+
     serviceUser = lib.mkOption {
       type    = lib.types.str;
       default = "w84ggufman";
@@ -154,7 +170,15 @@ in {
     };
   };
 
-  config = lib.mkIf cfg.enable {
+  config = lib.mkMerge [
+  # Auto-derive atopwebURL from services.atopweb when that service is present
+  # and enabled. mkDefault lets the user override it explicitly if needed.
+  (lib.mkIf (config.services ? atopweb && config.services.atopweb.enable) {
+    services.w84ggufman.atopwebURL = lib.mkDefault
+      "http://localhost:${toString config.services.atopweb.port}";
+  })
+
+  (lib.mkIf cfg.enable {
     # Create the service user when using the default name.
     # If serviceUser is set to an existing user, manage it yourself.
     users.users.${cfg.serviceUser} = lib.mkIf (cfg.serviceUser == "w84ggufman") {
@@ -219,5 +243,6 @@ in {
         }
       });
     '';
-  };
+  })
+  ]; # mkMerge
 }

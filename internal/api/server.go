@@ -16,6 +16,7 @@ type Config struct {
 	VramGiB                 float64
 	WarnVramPercent         float64
 	SelfService             string
+	AtopwebURL              string
 	ForceRestartOnLlamaSwap bool
 	ShowDotFiles            bool
 	RootIgnorePatterns      []string

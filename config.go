@@ -15,6 +15,7 @@ type Config struct {
 	VramGiB                 float64           `json:"vramGiB"`         // 0 = auto-detect
 	WarnVramPercent         float64           `json:"warnVramPercent"` // % of VRAM; default 80
 	SelfService             string            `json:"selfService"`     // systemd unit for self-restart (empty = disabled)
+	AtopwebURL              string            `json:"atopwebURL"`      // base URL of atopweb GPU monitor; "" disables
 	PresetGlobal            map[string]string `json:"presetGlobal"`
 	LlamaSwapConfig         string            `json:"llamaSwapConfig"`         // path to llama-swap config.yaml; empty = disabled
 	ForceRestartOnLlamaSwap bool              `json:"forceRestartOnLlamaSwap"` // restart service even when llama-swap hot-reload is active
@@ -33,6 +34,7 @@ func defaultConfig() Config {
 		VramGiB:         0,
 		WarnVramPercent: 80,
 		SelfService:     "w84ggufman.service",
+		AtopwebURL:      "http://localhost:5899",
 		PresetGlobal: map[string]string{
 			"ctx-size":     "65536",
 			"flash-attn":   "on",

@@ -110,6 +110,13 @@ pass it with `--config`:
   // service restarts anyway.
   "forceRestartOnLlamaSwap": false,
 
+  // Base URL of an atopweb instance for GPU VRAM monitoring.
+  // When reachable, w84ggufman polls /api/vram on this service instead of
+  // using system-level detection (nvidia-smi, AMD sysfs, Apple sysctl).
+  // Clicking the VRAM meter opens this URL in a new browser tab.
+  // Default: "http://localhost:5899". Set to "" to disable.
+  "atopwebURL": "http://localhost:5899",
+
   // Show dot/hidden directories as model cards in the Local Models view.
   // Default: false.
   "showDotFiles": false,
@@ -337,9 +344,51 @@ The NixOS module currently exposes these options:
 | `vramGiB` | float | `0.0` | VRAM/unified memory override (`0` = auto-detect) |
 | `warnVramPercent` | float | `80.0` | VRAM warning threshold percent |
 | `llamaSwapConfig` | string | `""` | Path to llama-swap `config.yaml`; empty disables integration |
+| `atopwebURL` | string | `"http://localhost:5899"` | atopweb GPU monitor URL; auto-derived when `services.atopweb.enable = true`; set `""` to disable |
 | `serviceUser` | string | `w84ggufman` | User running the service |
 | `serviceGroup` | string | `llm` | Group running the service |
 | `llamaServiceUser` | null or string | `null` | If set, forces `llamaService` unit `User=` (useful for AMD fdinfo visibility) |
+
+#### atopweb GPU monitoring
+
+[atopweb](https://github.com/emanspeaks/atopweb) is a web-based GPU monitor that
+exposes a `/api/vram` endpoint. When it is running alongside w84ggufman,
+w84ggufman polls that endpoint on every status refresh instead of using
+system-level detection. The VRAM meter in the header becomes a clickable link
+that opens the atopweb dashboard.
+
+**When atopweb is installed as a NixOS service**, no explicit `atopwebURL` is
+needed — the module detects `services.atopweb.enable = true` and automatically
+sets the URL from `services.atopweb.port`:
+
+```nix
+{
+  services.atopweb = {
+    enable = true;
+    # port = 5899;  # default; change here and w84ggufman picks it up automatically
+  };
+
+  services.w84ggufman = {
+    enable  = true;
+    package = w84ggufman.packages.x86_64-linux.default;
+    # atopwebURL is derived automatically from services.atopweb — nothing to set
+  };
+}
+```
+
+If atopweb runs on a different host or port than w84ggufman auto-detects, set
+`atopwebURL` explicitly:
+
+```nix
+services.w84ggufman = {
+  enable      = true;
+  package     = w84ggufman.packages.x86_64-linux.default;
+  atopwebURL  = "http://gpu-host:5899";
+};
+```
+
+Set `atopwebURL = ""` to disable atopweb integration entirely and always use
+system-level VRAM detection.
 
 #### Options available in app config but not currently exposed by the Nix module
 

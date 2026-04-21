@@ -134,6 +134,7 @@ func toAPIConfig(cfg Config) internalapi.Config {
 		VramGiB:                 cfg.VramGiB,
 		WarnVramPercent:         cfg.WarnVramPercent,
 		SelfService:             cfg.SelfService,
+		AtopwebURL:              cfg.AtopwebURL,
 		ForceRestartOnLlamaSwap: cfg.ForceRestartOnLlamaSwap,
 		ShowDotFiles:            cfg.ShowDotFiles,
 		RootIgnorePatterns:      append([]string(nil), cfg.RootIgnorePatterns...),
