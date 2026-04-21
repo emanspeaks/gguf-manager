@@ -125,13 +125,31 @@ in {
       default = null;
       description = ''
         If set, the llama.cpp systemd service (llamaService) will be configured
-        to run as this user. Setting this to the same value as serviceUser allows
-        w84ggufman to read /proc/<pid>/fdinfo for the llama.cpp process, which is
-        required for accurate AMD GPU VRAM usage monitoring via fdinfo (the same
-        method nvtop uses). Without same-user access the VRAM used bar will show
-        0 / unavailable on AMD systems using ROCm.
+        to run as this user. Setting this to the same value as serviceUser is an
+        alternative to grantVRAMMonitoringCapability: when the two services
+        share a UID, no capability is needed for w84ggufman to read
+        /proc/<pid>/fdinfo for the llama.cpp process. Ignored if llama.cpp
+        already runs as w84ggufman's user or as root.
 
         Example: llamaServiceUser = config.services.w84ggufman.serviceUser;
+      '';
+    };
+
+    grantVRAMMonitoringCapability = lib.mkOption {
+      type    = lib.types.bool;
+      default = true;
+      description = ''
+        When true (the default) the w84ggufman service is granted
+        CAP_SYS_PTRACE, which is required to read /proc/<pid>/fdinfo for
+        processes owned by other users (the method used to monitor AMD GPU
+        VRAM usage via fdinfo, matching nvtop). Without this capability, and
+        without aligning the UIDs via llamaServiceUser, the VRAM used bar
+        will show "?" on AMD systems because Linux denies cross-UID fdinfo
+        reads unless the caller holds CAP_SYS_PTRACE.
+
+        Set to false to disable VRAM usage monitoring (e.g. if you prefer to
+        align UIDs via llamaServiceUser, or use nvidia-smi which does not
+        need this capability).
       '';
     };
   };
@@ -165,6 +183,14 @@ in {
         Restart    = "on-failure";
         RestartSec = "5s";
         UMask      = "0002";
+      } // lib.optionalAttrs cfg.grantVRAMMonitoringCapability {
+        # CAP_SYS_PTRACE lets the non-root service read /proc/<pid>/fdinfo for
+        # processes owned by other users, which is required for AMD VRAM usage
+        # monitoring via fdinfo. Both AmbientCapabilities (passed to the process)
+        # and CapabilityBoundingSet (upper bound) are needed; without the latter
+        # systemd would strip the capability on exec.
+        AmbientCapabilities  = [ "CAP_SYS_PTRACE" ];
+        CapabilityBoundingSet = [ "CAP_SYS_PTRACE" ];
       };
     };
 

@@ -93,6 +93,7 @@ type Dependencies struct {
 	LlamaSwap  LlamaSwapManager
 
 	DetectVRAMBytes            func() uint64
+	DetectVRAMUsedBytes        func(llamaService string) (uint64, bool)
 	RestartService             func(service string) error
 	RemoveAllWritable          func(path string) error
 	IsOrgDir                   func(dir string) bool

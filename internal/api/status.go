@@ -45,6 +45,11 @@ func (s *Server) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		pct = 80
 	}
 	warnVram := uint64(float64(s.vramBytes) * pct / 100)
+	var vramUsed uint64
+	var vramUsedKnown bool
+	if s.vramBytes > 0 && s.deps.DetectVRAMUsedBytes != nil {
+		vramUsed, vramUsedKnown = s.deps.DetectVRAMUsedBytes(s.cfg.LlamaService)
+	}
 	writeJSON(w, statusResponse{
 		LlamaReachable:     reachable,
 		DownloadInProgress: inProgress,
@@ -53,8 +58,8 @@ func (s *Server) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		Disk:               disk,
 		WarnDownloadBytes:  warnBytes,
 		VramBytes:          s.vramBytes,
-		VramUsedBytes:      0,
-		VramUsedKnown:      false,
+		VramUsedBytes:      vramUsed,
+		VramUsedKnown:      vramUsedKnown,
 		WarnVramBytes:      warnVram,
 		LoadedModels:       loadedIDs,
 		LlamaSwapEnabled:   s.llamaSwap != nil,
