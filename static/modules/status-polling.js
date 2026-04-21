@@ -32,14 +32,24 @@ export async function pollStatus() {
       const pct = Math.round(s.disk.usedBytes / s.disk.totalBytes * 100);
       const fill = document.getElementById('disk-bar-fill');
       fill.style.width = pct + '%';
-      fill.className = 'disk-bar-fill ' + (pct >= 90 ? 'crit' : pct >= 75 ? 'warn' : 'ok');
+      fill.className = 'resource-bar-fill ' + (pct >= 90 ? 'crit' : pct >= 75 ? 'warn' : 'ok');
       document.getElementById('disk-text').textContent = formatBytes(s.disk.freeBytes) + ' free';
       document.getElementById('disk-info').style.display = 'flex';
     }
     if (s.vramBytes > 0) {
-      const el = document.getElementById('vram-total-text');
-      el.textContent = 'VRAM: ' + formatBytes(s.vramBytes);
-      el.style.display = '';
+      const fill = document.getElementById('vram-bar-fill');
+      const text = document.getElementById('vram-text');
+      if (s.vramUsedKnown) {
+        const pct = Math.round(s.vramUsedBytes / s.vramBytes * 100);
+        fill.style.width = pct + '%';
+        fill.className = 'resource-bar-fill ' + (pct >= 90 ? 'crit' : pct >= 75 ? 'warn' : 'ok');
+        text.textContent = 'VRAM: ' + formatBytes(s.vramUsedBytes) + ' / ' + formatBytes(s.vramBytes);
+      } else {
+        fill.style.width = '0%';
+        fill.className = 'resource-bar-fill ok';
+        text.textContent = 'VRAM: ? / ' + formatBytes(s.vramBytes);
+      }
+      document.getElementById('vram-info').style.display = 'flex';
     }
     setWarnThresholds(s.warnDownloadBytes, s.warnVramBytes);
     // Update loaded aliases on model cards without re-rendering
