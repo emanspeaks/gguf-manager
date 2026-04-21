@@ -12,5 +12,11 @@
       "GOOS": "linux",
       "GOARCH": "amd64"
     },
+    "chat.tools.terminal.autoApprove": {
+      "/^& \"C:\\\\Program Files\\\\Git\\\\bin\\\\bash\\.exe\" -lc \"GOOS=linux go build \\./\\.\\.\\.\"; Write-Output \"EXIT_CODE=\\$LASTEXITCODE\"$/": {
+        "approve": true,
+        "matchCommandLine": true
+      }
+    },
   }
 }
