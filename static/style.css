@@ -421,6 +421,8 @@ html.light #status-bar-chevron { color: #cbd5e1; }
 .resource-bar-fill.crit { background: #ef4444; }
 html.light .resource-meter { border-color: #cbd5e1; background: #f8fafc; }
 html.light .resource-bar { background: #e2e8f0; }
+.resource-meter--stacked { flex-direction: column; align-items: stretch; gap: 2px; }
+.resource-row { display: flex; align-items: center; gap: 0.5rem; }
 #disk-info { cursor: pointer; }
 #disk-info:hover { border-color: #3b82f6; }
 #vram-info.clickable { cursor: pointer; }
