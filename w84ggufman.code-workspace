@@ -5,6 +5,7 @@
     }
   ],
   "settings": {
+    "claudeCode.allowDangerouslySkipPermissions": true,
     "files.associations": {
       "VERSION": "plaintext"
     },

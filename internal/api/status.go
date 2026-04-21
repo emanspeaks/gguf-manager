@@ -20,6 +20,7 @@ type statusResponse struct {
 	LoadedModels       []string `json:"loadedModels"`
 	LlamaSwapEnabled   bool     `json:"llamaSwapEnabled"`
 	LlamaServiceLabel  string   `json:"llamaServiceLabel"`
+	AtopwebURL         string   `json:"atopwebURL,omitempty"`
 }
 
 func (s *Server) HandleStatus(w http.ResponseWriter, r *http.Request) {
@@ -37,6 +38,7 @@ func (s *Server) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.Body.Close()
 	}
+
 	active, inProgress := s.dl.ActiveInfo()
 	disk, _ := getDiskInfo(s.cfg.ModelsDir)
 	warnBytes := uint64(s.cfg.WarnDownloadGiB * 1024 * 1024 * 1024)
@@ -44,12 +46,27 @@ func (s *Server) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	if pct <= 0 {
 		pct = 80
 	}
-	warnVram := uint64(float64(s.vramBytes) * pct / 100)
+
+	// Resolve total and used VRAM. Atopweb is tried first when a URL is
+	// configured; on failure we fall back to system-level detection.
+	vramTotal := s.vramBytes
 	var vramUsed uint64
 	var vramUsedKnown bool
-	if s.vramBytes > 0 && s.deps.DetectVRAMUsedBytes != nil {
+	if s.cfg.AtopwebURL != "" {
+		if t, u, ok := probeAtopwebVRAM(s.cfg.AtopwebURL); ok {
+			if t > 0 {
+				vramTotal = t
+			}
+			vramUsed = u
+			vramUsedKnown = true
+		}
+	}
+	if !vramUsedKnown && vramTotal > 0 && s.deps.DetectVRAMUsedBytes != nil {
 		vramUsed, vramUsedKnown = s.deps.DetectVRAMUsedBytes(s.cfg.LlamaService)
 	}
+
+	warnVram := uint64(float64(vramTotal) * pct / 100)
+
 	writeJSON(w, statusResponse{
 		LlamaReachable:     reachable,
 		DownloadInProgress: inProgress,
@@ -57,12 +74,13 @@ func (s *Server) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		Version:            s.deps.Version,
 		Disk:               disk,
 		WarnDownloadBytes:  warnBytes,
-		VramBytes:          s.vramBytes,
+		VramBytes:          vramTotal,
 		VramUsedBytes:      vramUsed,
 		VramUsedKnown:      vramUsedKnown,
 		WarnVramBytes:      warnVram,
 		LoadedModels:       loadedIDs,
 		LlamaSwapEnabled:   s.llamaSwap != nil,
 		LlamaServiceLabel:  strings.TrimSuffix(s.cfg.LlamaService, ".service"),
+		AtopwebURL:         s.cfg.AtopwebURL,
 	})
 }

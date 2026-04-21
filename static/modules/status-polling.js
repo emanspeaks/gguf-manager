@@ -6,6 +6,7 @@ import { downloadInProgress, setDownloadState, openSSE, setWarnThresholds } from
 
 export let diskFreeBytes = 0;
 export let llamaSwapEnabled = false;
+export let atopwebURL = '';
 
 export async function pollStatus() {
   try {
@@ -26,6 +27,10 @@ export async function pollStatus() {
     if (s.version) {
       const ver = document.getElementById('app-version');
       if (!ver.textContent) ver.textContent = s.version;
+    }
+    if (s.atopwebURL != null) {
+      atopwebURL = s.atopwebURL;
+      document.getElementById('vram-info').classList.toggle('clickable', !!s.atopwebURL);
     }
     if (s.disk && s.disk.totalBytes > 0) {
       diskFreeBytes = s.disk.freeBytes;
