@@ -188,6 +188,20 @@ html.light .tpl-ph-hint code { background: #f1f5f9; color: #475569; }
 .hint a { color: #60a5fa; }
 .hint a:hover { color: #93c5fd; }
 .input-row { display: flex; gap: 0.5rem; margin-bottom: 0.875rem; }
+#hf-link-btn {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  white-space: normal;
+  font-size: 0.72rem;
+  line-height: 1;
+}
+.hf-two-line {
+  display: block;
+  line-height: 0.92;
+}
 label { color: #94a3b8; }
 input[type="text"] {
   flex: 1; padding: 6px 10px;

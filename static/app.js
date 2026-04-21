@@ -8,6 +8,7 @@ let diskFreeBytes = 0;
 let llamaSwapEnabled = false;
 let llamaServiceLabel = 'llama-server';
 let _refreshDlBtn = null; // set by renderRepoInfo so setDownloadState can re-evaluate
+let currentRepoContext = null;
 
 // ── Theme ──────────────────────────────────────────────────────────────────
 
@@ -237,6 +238,7 @@ document.getElementById('repo-input').addEventListener('input', () => {
 async function browseRepo() {
   const repoId = document.getElementById('repo-input').value.trim();
   if (!repoId) return;
+  currentRepoContext = { kind: 'repo', repoId };
   clearErr('repo-error');
   const results = document.getElementById('repo-results');
   results.innerHTML = '<p class="msg-loading">Fetching file list…</p>';
@@ -253,6 +255,7 @@ async function browseRepo() {
 }
 
 async function browseLocalPath(path, label) {
+  currentRepoContext = { kind: 'local', path, label: label || path };
   clearErr('repo-error');
   setRepoInput(label || path);
   const results = document.getElementById('repo-results');
@@ -659,6 +662,16 @@ async function startDownload(repoId, filenames, sidecarFiles, totalSize) {
   openSSE();
 }
 
+async function refreshCurrentRepoView() {
+  if (!currentRepoContext) return;
+  if (currentRepoContext.kind === 'local') {
+    await browseLocalPath(currentRepoContext.path, currentRepoContext.label);
+    return;
+  }
+  setRepoInput(currentRepoContext.repoId);
+  await browseRepo();
+}
+
 async function cancelDownload() {
   await fetch('/api/download/cancel', { method: 'POST' });
 }
@@ -696,6 +709,7 @@ function openSSE() {
       setStatusBar('Ready', 'Download complete', false);
       setDownloadState(false);
       fetchLocalModels();
+      refreshCurrentRepoView();
       pollStatus();
     } else if (msg.status === 'idle') {
       setStatusBar('Ready', '', false);
