@@ -143,7 +143,7 @@ func (s *Server) HandleLocal(w http.ResponseWriter, r *http.Request) {
 				if repoID == "" {
 					repoID = entry.Name() + "/" + repoEntry.Name()
 				}
-				files, size := s.deps.ScanFilesRelative(repoDir)
+				files, size := s.scanAndFilterFiles(repoDir)
 				if len(files) == 0 {
 					continue
 				}
@@ -163,7 +163,7 @@ func (s *Server) HandleLocal(w http.ResponseWriter, r *http.Request) {
 			repoID := meta.RepoID
 			sourceUnknown := false
 
-			files, size := s.deps.ScanFilesRelative(dirPath)
+			files, size := s.scanAndFilterFiles(dirPath)
 			if len(files) == 0 {
 				continue
 			}
@@ -199,6 +199,23 @@ func (s *Server) HandleLocal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, models)
+}
+
+// scanAndFilterFiles returns the file list and total size for dir with ignored
+// entries (dotfiles, .cache, user patterns) excluded from both the count and
+// the size sum.
+func (s *Server) scanAndFilterFiles(dir string) ([]string, int64) {
+	files, _ := s.deps.ScanFilesRelative(dir)
+	if s.deps.FilterIgnoredRelativeFiles != nil {
+		files = s.deps.FilterIgnoredRelativeFiles(dir, files, s.cfg)
+	}
+	var size int64
+	for _, f := range files {
+		if fi, err := os.Stat(filepath.Join(dir, filepath.FromSlash(f))); err == nil {
+			size += fi.Size()
+		}
+	}
+	return files, size
 }
 
 func (s *Server) fetchLoadedModels() (map[string]struct{}, error) {

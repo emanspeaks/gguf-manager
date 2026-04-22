@@ -26,6 +26,7 @@ type ModelMeta struct {
 	RepoID     string
 	SkipHFSync bool
 	Ignore     []string
+	CtxSize    int
 }
 
 type RepoFile struct {
@@ -57,11 +58,23 @@ type LlamaSwapModelEntry struct {
 	ReferencedPaths []string
 }
 
+type QueueEntry struct {
+	ID         int64    `json:"id"`
+	Label      string   `json:"label"`
+	TotalBytes int64    `json:"totalBytes"`
+	RepoID     string   `json:"repoId"`
+	Filenames  []string `json:"filenames"`
+}
+
 type Downloader interface {
 	ActiveInfo() (string, bool)
 	CancelDownload()
-	Start(repoID string, filenames []string, sidecarFiles []string, totalBytes int64, force bool) error
+	// Start enqueues or immediately begins a download. Returns (queued=true) if
+	// the request was added to the pending queue rather than started right away.
+	Start(repoID string, filenames []string, sidecarFiles []string, totalBytes int64, force bool) (bool, error)
 	StreamSSE(w http.ResponseWriter, r *http.Request)
+	QueueEntries() []QueueEntry
+	RemoveFromQueue(id int64) bool
 }
 
 type PresetManager interface {

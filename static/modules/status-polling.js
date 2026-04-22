@@ -8,6 +8,11 @@ export let diskFreeBytes = 0;
 export let llamaSwapEnabled = false;
 export let atopwebURL = '';
 
+// Last successfully received GPU / VRAM values. Null = never received.
+// Kept across polls so a single probe failure doesn't flash the row away.
+let lastVramUsedBytes = null;
+let lastGpuPct = null;
+
 export async function pollStatus() {
   try {
     const resp = await fetch('/api/status');
@@ -44,23 +49,24 @@ export async function pollStatus() {
     if (s.vramBytes > 0) {
       const fill = document.getElementById('vram-bar-fill');
       const text = document.getElementById('vram-text');
-      if (s.vramUsedKnown) {
-        const pct = Math.round(s.vramUsedBytes / s.vramBytes * 100);
+      if (s.vramUsedKnown) lastVramUsedBytes = s.vramUsedBytes;
+      if (lastVramUsedBytes !== null) {
+        const pct = Math.round(lastVramUsedBytes / s.vramBytes * 100);
         fill.style.width = pct + '%';
         fill.className = 'resource-bar-fill ' + (pct >= 90 ? 'crit' : pct >= 75 ? 'warn' : 'ok');
-        text.textContent = 'VRAM: ' + formatBytes(s.vramUsedBytes) + ' / ' + formatBytes(s.vramBytes);
+        text.textContent = 'VRAM: ' + formatBytes(lastVramUsedBytes) + ' / ' + formatBytes(s.vramBytes);
       } else {
         fill.style.width = '0%';
         fill.className = 'resource-bar-fill ok';
         text.textContent = 'VRAM: ? / ' + formatBytes(s.vramBytes);
       }
       const gpuRow = document.getElementById('gpu-row');
-      if (s.gpuPctKnown) {
-        const gpuPct = Math.round(s.gpuPct);
+      if (s.gpuPctKnown) lastGpuPct = Math.round(s.gpuPct);
+      if (lastGpuPct !== null) {
         const gpuFill = document.getElementById('gpu-bar-fill');
-        gpuFill.style.width = gpuPct + '%';
-        gpuFill.className = 'resource-bar-fill ' + (gpuPct >= 90 ? 'crit' : gpuPct >= 75 ? 'warn' : 'ok');
-        document.getElementById('gpu-text').textContent = 'GPU: ' + gpuPct + '%';
+        gpuFill.style.width = lastGpuPct + '%';
+        gpuFill.className = 'resource-bar-fill ' + (lastGpuPct >= 90 ? 'crit' : lastGpuPct >= 75 ? 'warn' : 'ok');
+        document.getElementById('gpu-text').textContent = 'GPU: ' + lastGpuPct + '%';
         gpuRow.style.display = 'flex';
       } else {
         gpuRow.style.display = 'none';

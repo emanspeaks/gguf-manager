@@ -330,6 +330,35 @@ html.light .badge-local    { background: #ede9fe; color: #5b21b6; }
 #status-resize-handle:hover,
 #status-resize-handle.dragging { background: #334155; }
 #status-bar.expanded #status-resize-handle { display: block; }
+#queue-panel {
+  border-top: 1px solid #1e293b;
+  padding: 4px 1rem 5px;
+  max-height: 120px; overflow-y: auto;
+}
+#queue-panel .queue-header {
+  color: #475569; text-transform: uppercase;
+  letter-spacing: 0.05em; font-size: 0.62rem;
+  margin-bottom: 3px;
+}
+#queue-panel .queue-item {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 1px 0;
+}
+#queue-panel .queue-item-label {
+  flex: 1; color: #94a3b8;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+#queue-panel .queue-item-size { color: #475569; white-space: nowrap; }
+#queue-panel .queue-item-remove {
+  background: none; border: none; color: #475569;
+  cursor: pointer; padding: 0 2px; font-size: 0.65rem;
+  line-height: 1; flex-shrink: 0;
+}
+#queue-panel .queue-item-remove:hover { color: #ef4444; }
+html.light #queue-panel { border-top-color: #e2e8f0; }
+html.light #queue-panel .queue-header { color: #94a3b8; }
+html.light #queue-panel .queue-item-label { color: #475569; }
+html.light #queue-panel .queue-item-size { color: #94a3b8; }
 #status-bar-main {
   display: flex; align-items: center; gap: 0.75rem;
   padding: 6px 1rem; min-height: 32px;
@@ -568,6 +597,27 @@ html.light .model-name-unknown { color: #94a3b8; }
 /* ── Rogue / unrecognized local files ────────────────────────────────────── */
 .rogue-row .rogue-name { color: #f87171; }
 html.light .rogue-row .rogue-name { color: #dc2626; }
+/* ── KV cache context widget ─────────────────────────────────────────────── */
+.kv-cache-row {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 6px 0 8px; flex-wrap: wrap;
+}
+.kv-cache-label {
+  display: flex; align-items: center; gap: 0.4rem;
+  font-size: 0.8rem; color: #94a3b8; white-space: nowrap;
+}
+.kv-cache-input {
+  width: 90px; padding: 3px 6px; border-radius: 4px;
+  border: 1px solid #334155; background: #1e293b; color: #f1f5f9;
+  font-size: 0.8rem; font-family: inherit;
+}
+.kv-cache-input:focus { outline: none; border-color: #60a5fa; }
+.kv-cache-estimate {
+  font-size: 0.78rem; color: #60a5fa; white-space: nowrap;
+}
+html.light .kv-cache-label { color: #64748b; }
+html.light .kv-cache-input { background: #f8fafc; border-color: #cbd5e1; color: #1e293b; }
+html.light .kv-cache-estimate { color: #2563eb; }
 /* ── Tags row ────────────────────────────────────────────────────────────── */
 .tags-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
 .badge-tag { background: #1e293b; color: #64748b; border: 1px solid #334155; font-weight: 400; }
