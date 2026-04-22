@@ -1,20 +1,11 @@
 package llamaswap
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
-// Templates holds the cmd format templates and default TTL values used when
-// generating new model entries in config.yaml.
-type Templates struct {
-	LLMCmd string `json:"llmCmd"`
-	// LLMTtl is the TTL in seconds for new LLM entries.
-	// -1 means "auto" (600 s for models under 10 B params, 0 otherwise).
-	LLMTtl          int    `json:"llmTtl"`
-	SDCmd            string `json:"sdCmd"`
-	SDTtl            int    `json:"sdTtl"`
-	SDCheckEndpoint  string `json:"sdCheckEndpoint"`
-}
-
-// Placeholder tokens used in cmd templates.
+// Placeholder tokens substituted in body templates when generating a model entry.
 const (
 	PlaceholderModelPath  = "{{MODEL_PATH}}"
 	PlaceholderModelName  = "{{MODEL_NAME}}"
@@ -22,73 +13,60 @@ const (
 	PlaceholderVaeLine    = "{{VAE_LINE}}"
 )
 
-// DefaultLLMCmd is the built-in LLM command template.
-// Uses llama-swap macro expansion; sub-args are indented 2 spaces so the
-// generated YAML literal block matches the recommended config.yaml style.
-const DefaultLLMCmd = "${llama-command-template}\n" +
-	"  -c ${default-context}\n" +
-	"  -m {{MODEL_PATH}}\n" +
-	"  {{MMPROJ_LINE}}\n" +
-	"  --alias {{MODEL_NAME}}"
+// DefaultLLMBody is the built-in LLM model entry body at 0-indent.
+// ttl: -1 is expanded to the size-based heuristic by ApplyBodyTemplate.
+const DefaultLLMBody = "cmd: |\n" +
+	"  ${llama-command-template}\n" +
+	"    -c ${default-context}\n" +
+	"    -m {{MODEL_PATH}}\n" +
+	"    {{MMPROJ_LINE}}\n" +
+	"    --alias {{MODEL_NAME}}\n" +
+	"ttl: -1\n" +
+	"metadata:\n" +
+	"  model_type: llm\n" +
+	"  port: ${PORT}"
 
-// DefaultSDCmd is the built-in SD command template.
-const DefaultSDCmd = "${sd-command-template}\n" +
-	"  --diffusion-model {{MODEL_PATH}}\n" +
-	"  {{VAE_LINE}}"
+// DefaultSDBody is the built-in SD model entry body at 0-indent.
+const DefaultSDBody = "cmd: |\n" +
+	"  ${sd-command-template}\n" +
+	"    --diffusion-model {{MODEL_PATH}}\n" +
+	"    {{VAE_LINE}}\n" +
+	"ttl: 600\n" +
+	"checkEndpoint: ${sd-check-endpoint}\n" +
+	"metadata:\n" +
+	"  model_type: sd\n" +
+	"  port: ${PORT}"
 
-// DefaultSDCheckEndpoint is the default checkEndpoint for SD model entries.
-const DefaultSDCheckEndpoint = "${sd-check-endpoint}"
-
-// DefaultTemplates returns the built-in fallback templates.
-func DefaultTemplates() Templates {
-	return Templates{
-		LLMCmd:          DefaultLLMCmd,
-		LLMTtl:          -1,
-		SDCmd:           DefaultSDCmd,
-		SDTtl:           600,
-		SDCheckEndpoint: DefaultSDCheckEndpoint,
-	}
-}
-
-// ApplyLLMCmd substitutes placeholders in the LLM cmd template and returns
-// the final command string with blank lines stripped.
-func ApplyLLMCmd(tpl Templates, modelPath, name, mmprojPath string) string {
+// ApplyBodyTemplate substitutes placeholders in a full model-entry body template
+// (at 0-indent) and returns the body ready for insertion. Blank lines produced
+// by empty optional substitutions are stripped. ttl: -1 is expanded to the
+// size-based heuristic (600 s for <10 B params, 0 otherwise).
+func ApplyBodyTemplate(body, modelPath, name, mmprojPath, vaePath string) string {
 	mmprojLine := ""
 	if mmprojPath != "" {
 		mmprojLine = "--mmproj " + mmprojPath
 	}
-	cmd := tpl.LLMCmd
-	cmd = strings.ReplaceAll(cmd, PlaceholderModelPath, modelPath)
-	cmd = strings.ReplaceAll(cmd, PlaceholderModelName, name)
-	cmd = strings.ReplaceAll(cmd, PlaceholderMmprojLine, mmprojLine)
-	return stripBlankLines(cmd)
-}
-
-// ApplySDCmd substitutes placeholders in the SD cmd template and returns the
-// final command string with blank lines stripped.
-func ApplySDCmd(tpl Templates, modelPath, vaePath string) string {
 	vaeLine := ""
 	if vaePath != "" {
 		vaeLine = "--vae " + vaePath
 	}
-	cmd := tpl.SDCmd
-	cmd = strings.ReplaceAll(cmd, PlaceholderModelPath, modelPath)
-	cmd = strings.ReplaceAll(cmd, PlaceholderVaeLine, vaeLine)
-	return stripBlankLines(cmd)
-}
-
-// LLMTtlFor returns the effective TTL for an LLM. If tpl.LLMTtl is -1 the
-// size-based heuristic is applied; otherwise the template value is used.
-func LLMTtlFor(tpl Templates, name string) int {
-	if tpl.LLMTtl == -1 {
-		return llmTTL(name)
+	body = strings.ReplaceAll(body, PlaceholderModelPath, modelPath)
+	body = strings.ReplaceAll(body, PlaceholderModelName, name)
+	body = strings.ReplaceAll(body, PlaceholderMmprojLine, mmprojLine)
+	body = strings.ReplaceAll(body, PlaceholderVaeLine, vaeLine)
+	// ttl: -1 is a magic value: expand to the size-based heuristic.
+	autoTTL := strconv.Itoa(llmTTL(name))
+	lines := strings.Split(body, "\n")
+	for i, l := range lines {
+		t := strings.TrimLeft(l, " \t")
+		if t == "ttl: -1" {
+			lines[i] = l[:len(l)-len(t)] + "ttl: " + autoTTL
+		}
 	}
-	return tpl.LLMTtl
+	return stripBlankLines(strings.Join(lines, "\n"))
 }
 
-// stripBlankLines removes lines that are empty or whitespace-only, which can
-// appear when an optional placeholder like {{MMPROJ_LINE}} is substituted with
-// an empty string.
+// stripBlankLines removes lines that are empty or whitespace-only.
 func stripBlankLines(s string) string {
 	lines := strings.Split(s, "\n")
 	out := lines[:0]

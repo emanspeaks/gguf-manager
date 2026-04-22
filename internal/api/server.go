@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 )
 
@@ -56,6 +55,7 @@ type LlamaSwapModelEntry struct {
 	Name            string
 	ModelPath       string
 	ReferencedPaths []string
+	Groups          []string
 }
 
 type QueueEntry struct {
@@ -93,10 +93,10 @@ type LlamaSwapManager interface {
 	RemoveModel(name string) error
 	AddModel(name, modelPath, mmprojPath, vaePath, modelType string) error
 	HasModel(name string) (bool, error)
-	LoadTemplates() any
 	ReadRaw(name string) (string, error)
 	WriteRaw(name, body string) error
-	UpdateTemplatesFromJSON(r io.Reader) error
+	ReadW84Config() (string, error)
+	WriteW84Config(body string) error
 	ReadAll() (string, error)
 	WriteAll(body string) error
 }

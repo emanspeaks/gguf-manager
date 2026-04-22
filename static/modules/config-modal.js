@@ -5,7 +5,7 @@ import { esc } from './utils.js';
 import { fetchLocalModels } from './local-models.js';
 import { pollStatus } from './status-polling.js';
 
-export async function openRawEditModal({ title, subtitle, endpoint, placeholder, successMsg, selectName }) {
+export async function openRawEditModal({ title, subtitle, endpoint, placeholder, successMsg, selectName, hintHtml }) {
   let body = '';
   try {
     const resp = await fetch(endpoint);
@@ -20,6 +20,7 @@ export async function openRawEditModal({ title, subtitle, endpoint, placeholder,
         ${esc(title)}${subtitle ? ' <small>' + esc(subtitle) + '</small>' : ''}
       </div>
       <textarea spellcheck="false" placeholder="${esc(placeholder)}">${esc(body)}</textarea>
+      ${hintHtml || ''}
       <div class="modal-actions">
         <button class="btn-secondary" id="modal-cancel">Cancel</button>
         <button class="btn-primary" id="modal-save">Save</button>
@@ -73,90 +74,24 @@ export async function openRawEditModal({ title, subtitle, endpoint, placeholder,
   }
 }
 
-export async function openTemplatesModal() {
+export async function openW84ConfigModal() {
   document.getElementById('status-menu').classList.remove('open');
-  let tpl = { llmCmd: '', llmTtl: -1, sdCmd: '', sdTtl: 600, sdCheckEndpoint: '${sd-check-endpoint}' };
-  try {
-    const resp = await fetch('/api/llamaswap/templates');
-    if (resp.ok) tpl = await resp.json();
-  } catch (_) {}
-
-  const backdrop = document.createElement('div');
-  backdrop.className = 'modal-backdrop';
-  backdrop.innerHTML = `
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <div class="modal-title" id="modal-title">Edit Command Templates
-        <small>Applied when new models are added to config.yaml</small>
-      </div>
-      <div class="modal-body">
-        <div class="tpl-section">
-          <div class="tpl-section-title">LLM models</div>
-          <textarea class="tpl-textarea" id="tpl-llm-cmd" spellcheck="false">${esc(tpl.llmCmd)}</textarea>
-          <div class="tpl-ph-hint">Placeholders: <code>{{MODEL_PATH}}</code> &nbsp;<code>{{MODEL_NAME}}</code> &nbsp;<code>{{MMPROJ_LINE}}</code> (omitted if no mmproj) &nbsp;<code>${'${PORT}'}</code> (llama-swap runtime)</div>
-          <div class="tpl-ttl-row">
-            <label for="tpl-llm-ttl">Default TTL (s):</label>
-            <input type="number" id="tpl-llm-ttl" value="${tpl.llmTtl}" min="-1">
-            <span class="tpl-ttl-hint">−1 = auto (600 s for &lt;10 B params, 0 otherwise)</span>
-          </div>
-        </div>
-        <div class="tpl-section">
-          <div class="tpl-section-title">SD / Flux models</div>
-          <textarea class="tpl-textarea" id="tpl-sd-cmd" spellcheck="false">${esc(tpl.sdCmd)}</textarea>
-          <div class="tpl-ph-hint">Placeholders: <code>{{MODEL_PATH}}</code> &nbsp;<code>{{VAE_LINE}}</code> (omitted if no VAE) &nbsp;<code>${'${PORT}'}</code> (llama-swap runtime)</div>
-          <div class="tpl-ttl-row">
-            <label for="tpl-sd-ttl">Default TTL (s):</label>
-            <input type="number" id="tpl-sd-ttl" value="${tpl.sdTtl}" min="-1">
-          </div>
-          <div class="tpl-ttl-row">
-            <label for="tpl-sd-check">checkEndpoint:</label>
-            <input type="text" id="tpl-sd-check" value="${esc(tpl.sdCheckEndpoint)}" style="flex:1;padding:4px 8px;background:#0f172a;border:1px solid #334155;border-radius:5px;color:#f1f5f9;font-size:0.825rem;outline:none;font-family:inherit" spellcheck="false">
-            <span class="tpl-ttl-hint">macro or literal path (e.g. <code style="font-size:0.7rem">${'${sd-check-endpoint}'}</code>)</span>
-          </div>
-        </div>
-      </div>
-      <div class="modal-actions">
-        <button class="btn-secondary" id="modal-cancel">Cancel</button>
-        <button class="btn-primary" id="modal-save">Save</button>
-      </div>
-    </div>
-  `;
-
-  function closeModal() {
-    document.body.removeChild(backdrop);
-  }
-
-  backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
-
-  backdrop.querySelector('#modal-save').addEventListener('click', async () => {
-    const saveBtn = backdrop.querySelector('#modal-save');
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Saving…';
-    const payload = {
-      llmCmd:          backdrop.querySelector('#tpl-llm-cmd').value,
-      llmTtl:          parseInt(backdrop.querySelector('#tpl-llm-ttl').value, 10) || 0,
-      sdCmd:           backdrop.querySelector('#tpl-sd-cmd').value,
-      sdTtl:           parseInt(backdrop.querySelector('#tpl-sd-ttl').value, 10) || 0,
-      sdCheckEndpoint: backdrop.querySelector('#tpl-sd-check').value,
-    };
-    try {
-      const resp = await fetch('/api/llamaswap/templates', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!resp.ok) throw new Error(await resp.text());
-      closeModal();
-      setStatusBar('Ready', 'Command templates saved', false);
-    } catch (e) {
-      setStatusBar('Error', 'Save failed: ' + e.message, false);
-      saveBtn.disabled = false;
-      saveBtn.textContent = 'Save';
-    }
+  await openRawEditModal({
+    title: 'Edit W84 Config',
+    subtitle: '.w84ggufman.yaml',
+    endpoint: '/api/llamaswap/w84config',
+    placeholder: '',
+    successMsg: '.w84ggufman.yaml saved',
+    hintHtml: `<div class="tpl-ph-hint">
+      <strong>Template placeholders</strong> — w84ggufman expands these when adding a model to config.yaml:<br>
+      <code>{{MODEL_PATH}}</code> &mdash; absolute path to the model file<br>
+      <code>{{MODEL_NAME}}</code> &mdash; model name / alias<br>
+      <code>{{MMPROJ_LINE}}</code> &mdash; <code>--mmproj&nbsp;/path</code>, or blank (line removed if no mmproj file)<br>
+      <code>{{VAE_LINE}}</code> &mdash; <code>--vae&nbsp;/path</code>, or blank (line removed if no VAE file)<br>
+      <code>ttl:&nbsp;-1</code> &mdash; auto-detect TTL: 600&nbsp;s for &lt;10&nbsp;B-param models, 0&nbsp;(never unload) otherwise<br>
+      <code>${'${PORT}'}</code> and other <code>${'{…}'}</code> tokens are llama-swap macros, passed through as-is.
+    </div>`,
   });
-
-  document.body.appendChild(backdrop);
-  backdrop.querySelector('#tpl-llm-cmd').focus();
-  backdrop.querySelector('#tpl-llm-cmd').setSelectionRange(0, 0);
 }
 
 export async function openFullConfigModal(llamaSwapEnabled, selectName) {

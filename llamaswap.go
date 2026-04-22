@@ -1,84 +1,103 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
 	"github.com/emanspeaks/w84ggufman/internal/llamaswap"
+	"gopkg.in/yaml.v3"
 )
 
-// llamaSwapManager manages the llama-swap config.yaml file in parallel with
-// models.ini. The models.ini code is preserved so the setup can be reverted;
-// this manager is only active when LlamaSwapConfig is set in the config.
-//
-// All mutations are line-based edits that touch only the target block,
-// preserving comments, scalar styles, key ordering, and surrounding
-// whitespace. See internal/llamaswap/config_ops.go.
 type llamaSwapManager struct {
-	path string
+	path      string // path to config.yaml
+	modelsDir string // models root directory (.w84ggufman.yaml lives here)
 }
 
-// newLlamaSwapManager returns a manager for the given config, or nil if
-// LlamaSwapConfig is empty (feature disabled).
 func newLlamaSwapManager(cfg Config) *llamaSwapManager {
 	if cfg.LlamaSwapConfig == "" {
 		return nil
 	}
-	return &llamaSwapManager{path: cfg.LlamaSwapConfig}
+	return &llamaSwapManager{path: cfg.LlamaSwapConfig, modelsDir: cfg.ModelsDir}
 }
 
-// AddModel adds or replaces a model entry in config.yaml and registers it in
-// the appropriate group. modelType ("llm" or "sd") selects the template; if
-// empty, it is inferred from name/vaePath. vaePath is the path to the VAE
-// (ae.safetensors) for Stable Diffusion models. mmprojPath is the vision
-// projector for multimodal LLMs.
+// w84Config holds the w84ggufman-specific configuration stored in
+// .w84ggufman.yaml in the models root directory.
+type w84Config struct {
+	Templates map[string]string `yaml:"templates,omitempty"`
+}
+
+func (c w84Config) templateFor(modelType string) string {
+	if t := c.Templates[modelType]; t != "" {
+		return t
+	}
+	if modelType == "sd" {
+		return llamaswap.DefaultSDBody
+	}
+	return llamaswap.DefaultLLMBody
+}
+
+func (m *llamaSwapManager) w84ConfigPath() string {
+	return filepath.Join(m.modelsDir, ".w84ggufman.yaml")
+}
+
+func (m *llamaSwapManager) loadW84Config() w84Config {
+	data, err := os.ReadFile(m.w84ConfigPath())
+	if err != nil {
+		return w84Config{}
+	}
+	var cfg w84Config
+	yaml.Unmarshal(data, &cfg)
+	return cfg
+}
+
+// defaultW84ConfigYAML is shown when no .w84ggufman.yaml file exists yet.
+const defaultW84ConfigYAML = `templates:
+  llm: |
+    cmd: |
+      ${llama-command-template}
+        -c ${default-context}
+        -m {{MODEL_PATH}}
+        {{MMPROJ_LINE}}
+        --alias {{MODEL_NAME}}
+    ttl: -1
+    metadata:
+      model_type: llm
+      port: ${PORT}
+  sd: |
+    cmd: |
+      ${sd-command-template}
+        --diffusion-model {{MODEL_PATH}}
+        {{VAE_LINE}}
+    ttl: 600
+    checkEndpoint: ${sd-check-endpoint}
+    metadata:
+      model_type: sd
+      port: ${PORT}
+`
+
+func (m *llamaSwapManager) readW84ConfigRaw() (string, error) {
+	data, err := os.ReadFile(m.w84ConfigPath())
+	if os.IsNotExist(err) {
+		return defaultW84ConfigYAML, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func (m *llamaSwapManager) writeW84Config(body string) error {
+	return os.WriteFile(m.w84ConfigPath(), []byte(body), 0664)
+}
+
+// AddModel adds or replaces a model entry in config.yaml using the template
+// from .w84ggufman.yaml for the appropriate model type.
 func (m *llamaSwapManager) AddModel(name, modelPath, mmprojPath, vaePath, modelType string) error {
-	return llamaswap.AddOrReplaceModelInFile(m.path, name, modelPath, mmprojPath, vaePath, modelType, m.LoadTemplates())
+	cfg := m.loadW84Config()
+	return llamaswap.AddOrReplaceModelInFile(m.path, name, modelPath, mmprojPath, vaePath, modelType, cfg.Templates)
 }
 
-// templatesPath returns the path to the JSON templates file stored alongside
-// config.yaml.
-func (m *llamaSwapManager) templatesPath() string {
-	return filepath.Join(filepath.Dir(m.path), "w84ggufman-templates.json")
-}
-
-// LoadTemplates reads the templates file, returning defaults if not found or
-// unreadable.
-func (m *llamaSwapManager) LoadTemplates() llamaswap.Templates {
-	data, err := os.ReadFile(m.templatesPath())
-	if err != nil {
-		return llamaswap.DefaultTemplates()
-	}
-	var tpl llamaswap.Templates
-	if err := json.Unmarshal(data, &tpl); err != nil {
-		return llamaswap.DefaultTemplates()
-	}
-	return tpl
-}
-
-// SaveTemplates writes the templates file.
-func (m *llamaSwapManager) SaveTemplates(tpl llamaswap.Templates) error {
-	data, err := json.MarshalIndent(tpl, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(m.templatesPath(), data, 0664)
-}
-
-// UpdateTemplatesFromJSON parses JSON from r and saves the templates file.
-func (m *llamaSwapManager) UpdateTemplatesFromJSON(r io.Reader) error {
-	var tpl llamaswap.Templates
-	if err := json.NewDecoder(r).Decode(&tpl); err != nil {
-		return fmt.Errorf("invalid templates JSON: %w", err)
-	}
-	return m.SaveTemplates(tpl)
-}
-
-// RemoveModel removes a model entry from config.yaml and from all group
-// member lists.
+// RemoveModel removes a model entry from config.yaml.
 func (m *llamaSwapManager) RemoveModel(name string) error {
 	return llamaswap.RemoveModelFromFile(m.path, name)
 }
@@ -88,14 +107,12 @@ func (m *llamaSwapManager) HasModel(name string) (bool, error) {
 	return llamaswap.HasModelInFile(m.path, name)
 }
 
-// ReadRaw returns the body of the named model entry as it appears in the
-// file, suitable for display in a text editor.
+// ReadRaw returns the body of the named model entry for display in a text editor.
 func (m *llamaSwapManager) ReadRaw(name string) (string, error) {
 	return llamaswap.ReadModelRawFromFile(m.path, name)
 }
 
-// WriteRaw replaces the body of the named model entry with the supplied
-// text, leaving the rest of the file untouched.
+// WriteRaw replaces the body of the named model entry.
 func (m *llamaSwapManager) WriteRaw(name, body string) error {
 	return llamaswap.WriteModelRawToFile(m.path, name, body)
 }
