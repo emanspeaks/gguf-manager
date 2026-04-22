@@ -72,6 +72,13 @@ export function renderQueuePanel(entries) {
 export function setupStatusBar() {
   document.getElementById('status-bar-main').addEventListener('click', toggleStatusBar);
 
+  // Give the log scroll focus whenever the user interacts with the log area so
+  // the mouse wheel scrolls the log rather than the main page.
+  const log = document.getElementById('status-log');
+  const logWrapper = document.getElementById('status-log-wrapper');
+  logWrapper.addEventListener('mouseenter', () => log.focus({ preventScroll: true }));
+  logWrapper.addEventListener('mousedown', () => log.focus({ preventScroll: true }));
+
   // Log resize handler
   const handle = document.getElementById('status-resize-handle');
   let startY = 0, startHeight = 200;
