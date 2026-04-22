@@ -13,7 +13,7 @@ import { setupRepoBrowser } from './modules/repo-browser.js';
 import { fetchLocalModels } from './modules/local-models.js';
 import { pollStatus, setupStatusPolling, llamaSwapEnabled, atopwebURL } from './modules/status-polling.js';
 import { cancelDownload } from './modules/download.js';
-import { openFullConfigModal, openTemplatesModal } from './modules/config-modal.js';
+import { openFullConfigModal, openW84ConfigModal } from './modules/config-modal.js';
 import { openDiskTreemap } from './modules/disk-treemap.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -41,7 +41,7 @@ document.getElementById('edit-config-btn').addEventListener('click', () => {
 });
 
 document.getElementById('edit-templates-btn').addEventListener('click', () => {
-  openTemplatesModal().catch(console.error);
+  openW84ConfigModal().catch(console.error);
 });
 
 document.getElementById('cancel-dl-btn').addEventListener('click', cancelDownload);

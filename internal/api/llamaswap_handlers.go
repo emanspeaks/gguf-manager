@@ -49,21 +49,32 @@ func (s *Server) HandlePutLlamaSwapRaw(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) HandleGetLlamaSwapTemplates(w http.ResponseWriter, r *http.Request) {
+func (s *Server) HandleGetW84Config(w http.ResponseWriter, r *http.Request) {
 	if s.llamaSwap == nil {
 		http.Error(w, "llama-swap not configured", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, s.llamaSwap.LoadTemplates())
+	body, err := s.llamaSwap.ReadW84Config()
+	if err != nil {
+		http.Error(w, "failed to read w84 config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write([]byte(body))
 }
 
-func (s *Server) HandlePutLlamaSwapTemplates(w http.ResponseWriter, r *http.Request) {
+func (s *Server) HandlePutW84Config(w http.ResponseWriter, r *http.Request) {
 	if s.llamaSwap == nil {
 		http.Error(w, "llama-swap not configured", http.StatusNotFound)
 		return
 	}
-	if err := s.llamaSwap.UpdateTemplatesFromJSON(io.LimitReader(r.Body, 64<<10)); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "failed to read body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.llamaSwap.WriteW84Config(string(raw)); err != nil {
+		http.Error(w, "failed to write w84 config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -9,15 +9,21 @@ import (
 	"strings"
 )
 
+type configAlias struct {
+	Name   string   `json:"name"`
+	Groups []string `json:"groups"`
+	Loaded bool     `json:"loaded"`
+}
+
 type localModel struct {
-	RepoID        string   `json:"repoId"`
-	Path          string   `json:"path"`
-	Files         []string `json:"files"`
-	SizeBytes     int64    `json:"sizeBytes"`
-	LoadedAliases []string `json:"loadedAliases"`
-	InConfig      bool     `json:"inConfig"`
-	IsLocal       bool     `json:"isLocal"`
-	SourceUnknown bool     `json:"sourceUnknown"`
+	RepoID        string        `json:"repoId"`
+	Path          string        `json:"path"`
+	Files         []string      `json:"files"`
+	SizeBytes     int64         `json:"sizeBytes"`
+	ConfigAliases []configAlias `json:"configAliases"`
+	InConfig      bool          `json:"inConfig"`
+	IsLocal       bool          `json:"isLocal"`
+	SourceUnknown bool          `json:"sourceUnknown"`
 }
 
 type llamaModelsResponse struct {
@@ -41,8 +47,9 @@ func (s *Server) HandleLocal(w http.ResponseWriter, r *http.Request) {
 	loadedModels, _ := s.fetchLoadedModels()
 
 	type configEntry struct {
-		name  string
-		paths []string
+		name   string
+		paths  []string
+		groups []string
 	}
 	var configEntries []configEntry
 	appendConfigPath := func(name, p string) {
@@ -64,10 +71,14 @@ func (s *Server) HandleLocal(w http.ResponseWriter, r *http.Request) {
 	if s.llamaSwap != nil {
 		if lsModels, err := s.llamaSwap.ListModels(); err == nil {
 			for _, m := range lsModels {
+				groups := m.Groups
+				if groups == nil {
+					groups = []string{}
+				}
 				if len(m.ReferencedPaths) > 0 {
-					configEntries = append(configEntries, configEntry{name: m.Name, paths: m.ReferencedPaths})
+					configEntries = append(configEntries, configEntry{name: m.Name, paths: m.ReferencedPaths, groups: groups})
 				} else if m.ModelPath != "" {
-					configEntries = append(configEntries, configEntry{name: m.Name, paths: []string{m.ModelPath}})
+					configEntries = append(configEntries, configEntry{name: m.Name, paths: []string{m.ModelPath}, groups: groups})
 				}
 			}
 		}
@@ -87,29 +98,27 @@ func (s *Server) HandleLocal(w http.ResponseWriter, r *http.Request) {
 		return false
 	}
 
-	loadedAliasesFor := func(repoDir string) []string {
+	configAliasesFor := func(repoDir string) []configAlias {
 		rd := filepath.Clean(repoDir)
 		sep := string(filepath.Separator)
-		var aliases []string
+		var aliases []configAlias
 		seen := make(map[string]struct{})
 		for _, e := range configEntries {
-			if _, ok := loadedModels[e.name]; !ok {
-				continue
-			}
 			if _, ok := seen[e.name]; ok {
 				continue
 			}
 			for _, cp := range e.paths {
 				p := filepath.Clean(cp)
 				if p == rd || strings.HasPrefix(p, rd+sep) {
-					aliases = append(aliases, e.name)
+					_, loaded := loadedModels[e.name]
+					aliases = append(aliases, configAlias{Name: e.name, Groups: e.groups, Loaded: loaded})
 					seen[e.name] = struct{}{}
 					break
 				}
 			}
 		}
 		if aliases == nil {
-			return []string{}
+			return []configAlias{}
 		}
 		return aliases
 	}
@@ -152,7 +161,7 @@ func (s *Server) HandleLocal(w http.ResponseWriter, r *http.Request) {
 					Path:          repoDir,
 					Files:         files,
 					SizeBytes:     size,
-					LoadedAliases: loadedAliasesFor(repoDir),
+					ConfigAliases: configAliasesFor(repoDir),
 					InConfig:      inConfigFor(repoDir),
 					IsLocal:       meta.SkipHFSync,
 					SourceUnknown: false,
@@ -190,7 +199,7 @@ func (s *Server) HandleLocal(w http.ResponseWriter, r *http.Request) {
 				Path:          dirPath,
 				Files:         files,
 				SizeBytes:     size,
-				LoadedAliases: loadedAliasesFor(dirPath),
+				ConfigAliases: configAliasesFor(dirPath),
 				InConfig:      inConfigFor(dirPath),
 				IsLocal:       meta.SkipHFSync,
 				SourceUnknown: sourceUnknown,
@@ -237,7 +246,7 @@ func (s *Server) HandleLocal(w http.ResponseWriter, r *http.Request) {
 				Path:          dir,
 				Files:         []string{},
 				SizeBytes:     0,
-				LoadedAliases: loadedAliasesFor(dir),
+				ConfigAliases: configAliasesFor(dir),
 				InConfig:      true,
 				IsLocal:       isLocal,
 				SourceUnknown: repoID == "" && !isLocal,

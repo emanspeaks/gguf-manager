@@ -50,8 +50,7 @@ groups:
       - foo
 `
 	path := writeTempConfig(t, initial)
-	tpl := DefaultTemplates()
-	if err := AddOrReplaceModelInFile(path, "bar", "/models/bar.gguf", "", "", "llm", tpl); err != nil {
+	if err := AddOrReplaceModelInFile(path, "bar", "/models/bar.gguf", "", "", "llm", nil); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	got := readFile(t, path)
@@ -94,8 +93,7 @@ groups:
       - foo
 `
 	path := writeTempConfig(t, initial)
-	tpl := DefaultTemplates()
-	if err := AddOrReplaceModelInFile(path, "flux-dev", "/models/flux.gguf", "", "/vae.safetensors", "sd", tpl); err != nil {
+	if err := AddOrReplaceModelInFile(path, "flux-dev", "/models/flux.gguf", "", "/vae.safetensors", "sd", nil); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	got := readFile(t, path)
@@ -208,8 +206,7 @@ func TestAddOrReplaceModel_ReplacesInPlace(t *testing.T) {
     ttl: 2
 `
 	path := writeTempConfig(t, initial)
-	tpl := DefaultTemplates()
-	if err := AddOrReplaceModelInFile(path, "foo", "/new/foo.gguf", "", "", "llm", tpl); err != nil {
+	if err := AddOrReplaceModelInFile(path, "foo", "/new/foo.gguf", "", "", "llm", nil); err != nil {
 		t.Fatalf("replace: %v", err)
 	}
 	got := readFile(t, path)

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"net/http"
 
 	internalapi "github.com/emanspeaks/w84ggufman/internal/api"
@@ -101,6 +100,7 @@ func (a llamaSwapAdapter) ListModels() ([]internalapi.LlamaSwapModelEntry, error
 			Name:            m.Name,
 			ModelPath:       m.ModelPath,
 			ReferencedPaths: append([]string(nil), m.ReferencedPaths...),
+			Groups:          append([]string(nil), m.Groups...),
 		})
 	}
 	return out, nil
@@ -118,10 +118,6 @@ func (a llamaSwapAdapter) HasModel(name string) (bool, error) {
 	return a.l.HasModel(name)
 }
 
-func (a llamaSwapAdapter) LoadTemplates() any {
-	return a.l.LoadTemplates()
-}
-
 func (a llamaSwapAdapter) ReadRaw(name string) (string, error) {
 	return a.l.ReadRaw(name)
 }
@@ -130,8 +126,12 @@ func (a llamaSwapAdapter) WriteRaw(name, body string) error {
 	return a.l.WriteRaw(name, body)
 }
 
-func (a llamaSwapAdapter) UpdateTemplatesFromJSON(r io.Reader) error {
-	return a.l.UpdateTemplatesFromJSON(r)
+func (a llamaSwapAdapter) ReadW84Config() (string, error) {
+	return a.l.readW84ConfigRaw()
+}
+
+func (a llamaSwapAdapter) WriteW84Config(body string) error {
+	return a.l.writeW84Config(body)
 }
 
 func (a llamaSwapAdapter) ReadAll() (string, error) {

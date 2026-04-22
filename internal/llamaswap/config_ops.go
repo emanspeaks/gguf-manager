@@ -3,7 +3,6 @@ package llamaswap
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 )
 
@@ -251,24 +250,41 @@ func RemoveModelFromFile(path, name string) error {
 }
 
 // AddOrReplaceModelInFile upserts the named model entry in the file at path
-// using the supplied template. LLM entries are inserted at the top of the
-// models: section; SD entries are appended at the bottom. Existing entries
-// are replaced in place. Groups are never touched — membership is managed
-// manually by the user.
+// using the supplied templates map (keyed by "llm", "sd", etc.). If the
+// appropriate key is absent or empty, a built-in default is used. LLM entries
+// are inserted at the top of the models: section; SD entries are appended at
+// the bottom. Existing entries are replaced in place. Groups are never
+// touched — membership is managed manually by the user.
 //
 // modelType ("llm" or "sd") forces the model kind; when empty the name/vae
 // heuristic from isSDModel is used.
-func AddOrReplaceModelInFile(path, name, modelPath, mmprojPath, vaePath, modelType string, tpl Templates) error {
+func AddOrReplaceModelInFile(path, name, modelPath, mmprojPath, vaePath, modelType string, templates map[string]string) error {
 	var sd bool
+	var tplKey string
 	switch modelType {
 	case "sd":
 		sd = true
+		tplKey = "sd"
 	case "llm":
 		sd = false
+		tplKey = "llm"
 	default:
 		sd = isSDModel(name, vaePath)
+		if sd {
+			tplKey = "sd"
+		} else {
+			tplKey = "llm"
+		}
 	}
-	body := buildModelBody(name, modelPath, mmprojPath, vaePath, sd, tpl)
+	tplBody := templates[tplKey]
+	if tplBody == "" {
+		if sd {
+			tplBody = DefaultSDBody
+		} else {
+			tplBody = DefaultLLMBody
+		}
+	}
+	body := ApplyBodyTemplate(tplBody, modelPath, name, mmprojPath, vaePath)
 
 	lines, err := readConfigLines(path)
 	if err != nil {
@@ -279,49 +295,6 @@ func AddOrReplaceModelInFile(path, name, modelPath, mmprojPath, vaePath, modelTy
 	}
 	lines = upsertModelEntry(lines, name, body, sd)
 	return writeConfigLines(path, lines)
-}
-
-// buildModelBody renders the body of a model entry at 0-indent (cmd block
-// scalar content at indent 2; the caller re-indents by 4 for the file).
-func buildModelBody(name, modelPath, mmprojPath, vaePath string, sd bool, tpl Templates) string {
-	var cmd string
-	var ttl int
-	if sd {
-		cmd = ApplySDCmd(tpl, modelPath, vaePath)
-		ttl = tpl.SDTtl
-	} else {
-		cmd = ApplyLLMCmd(tpl, modelPath, name, mmprojPath)
-		ttl = LLMTtlFor(tpl, name)
-	}
-	var b strings.Builder
-	b.WriteString("cmd: |\n")
-	for _, line := range strings.Split(cmd, "\n") {
-		b.WriteString("  ")
-		b.WriteString(line)
-		b.WriteByte('\n')
-	}
-	b.WriteString("ttl: ")
-	b.WriteString(strconv.Itoa(ttl))
-	b.WriteByte('\n')
-	if sd {
-		checkEndpoint := tpl.SDCheckEndpoint
-		if checkEndpoint == "" {
-			checkEndpoint = DefaultSDCheckEndpoint
-		}
-		b.WriteString("checkEndpoint: ")
-		b.WriteString(checkEndpoint)
-		b.WriteByte('\n')
-	}
-	mType := "llm"
-	if sd {
-		mType = "sd"
-	}
-	b.WriteString("metadata:\n")
-	b.WriteString("  model_type: ")
-	b.WriteString(mType)
-	b.WriteByte('\n')
-	b.WriteString("  port: ${PORT}")
-	return b.String()
 }
 
 // upsertModelEntry replaces (or inserts) the `  name:` block under the

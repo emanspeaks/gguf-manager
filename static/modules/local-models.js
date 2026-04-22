@@ -25,7 +25,7 @@ export function renderLocalModels(models) {
   for (const m of models) {
     const card = document.createElement('div');
     card.className = 'model-card clickable';
-    card.dataset.aliases = (m.loadedAliases || []).join(',');
+    card.dataset.aliases = (m.configAliases || []).filter(a => a.loaded).map(a => a.name).join(',');
     card.dataset.inConfig = m.inConfig ? '1' : '0';
 
     let titleText, titleClass = 'model-name';
@@ -44,14 +44,30 @@ export function renderLocalModels(models) {
     const badges = [];
     if (m.isLocal) badges.push(`<span class="badge badge-local">local</span>`);
     if (m.sourceUnknown) badges.push(`<span class="badge badge-warn-preset">unknown source</span>`);
-    if (m.inConfig) badges.push(`<span class="badge badge-inconfig" title="Referenced in models.ini or config.yaml">In&nbsp;config</span>`);
 
-    const loadedAliases = m.loadedAliases || [];
-    const loadedHtml = loadedAliases.length > 0
-      ? loadedAliases.map(a => `<span class="badge badge-loaded" title="Loaded preset alias from config file">${esc(a)}</span>`).join(' ')
-      : (m.inConfig
-        ? '<span class="badge badge-configured" title="Referenced in config files but not currently loaded">Configured</span>'
-        : '<span class="badge badge-unloaded" title="Not referenced in config files and not currently loaded">Unused</span>');
+    const configAliases = m.configAliases || [];
+    let loadedHtml;
+    if (configAliases.length > 0) {
+      loadedHtml = configAliases.map(a => {
+        const groups = a.groups || [];
+        let cls, label;
+        if (groups.length === 0) {
+          cls = 'badge-group-none';
+          label = esc(a.name);
+        } else if (groups.length === 1) {
+          cls = 'badge-group-ok';
+          label = `${esc(a.name)} [${esc(groups[0])}]`;
+        } else {
+          cls = 'badge-group-multi';
+          label = `${esc(a.name)} [${groups.map(g => esc(g)).join(', ')}]`;
+        }
+        const title = a.loaded ? 'Currently loaded' : 'Configured but not loaded';
+        const activeCls = a.loaded ? ' badge-active' : '';
+        return `<span class="badge ${cls}${activeCls}" title="${title}">${label}</span>`;
+      }).join(' ');
+    } else {
+      loadedHtml = '<span class="badge badge-unloaded" title="Not referenced in config files and not currently loaded">Unused</span>';
+    }
 
     card.innerHTML = `
       <div class="model-meta">
