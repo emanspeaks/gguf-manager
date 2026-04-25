@@ -50,7 +50,7 @@ document.getElementById('disk-info').addEventListener('click', () => {
   openDiskTreemap().catch(console.error);
 });
 
-document.getElementById('vram-info').addEventListener('click', () => {
+document.getElementById('ram-info').addEventListener('click', () => {
   if (atopwebURL) window.open(atopwebURL, '_blank', 'noopener');
 });
 

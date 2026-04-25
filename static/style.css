@@ -250,8 +250,8 @@ input[type="text"]:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,
 .quant-tile:hover { border-color: #64748b; color: #e2e8f0; }
 .quant-tile.selected { border-color: #3b82f6; background: rgba(59,130,246,0.15); color: #93c5fd; }
 .quant-tile.toobig { border-color: #7f1d1d; color: #9b4444; cursor: default; opacity: 0.7; }
-.quant-tile.vramwarn { border-color: #92400e; }
-.quant-tile.vramwarn .quant-tile-size { color: #f59e0b; }
+.quant-tile.ramwarn { border-color: #92400e; }
+.quant-tile.ramwarn .quant-tile-size { color: #f59e0b; }
 .quant-tile-name { padding: 3px 6px; font-weight: 500; }
 .quant-tile-size {
   padding: 3px 6px; font-size: 0.62rem; color: #475569;
@@ -443,7 +443,7 @@ html.light #status-log     { border-top-color: #e2e8f0; color: #64748b; }
 html.light #status-bar-label { color: #94a3b8; border-right-color: #e2e8f0; }
 html.light #status-bar.active #status-bar-text { color: #0f172a; }
 html.light #status-bar-chevron { color: #cbd5e1; }
-/* ── Resource bars (disk + VRAM) ─────────────────────────────────────────── */
+/* ── Resource bars (disk + RAM) ──────────────────────────────────────────── */
 .resource-bars { display: flex; flex-direction: row; gap: 6px; flex-shrink: 0; }
 .resource-meter {
   display: flex; align-items: center; gap: 0.5rem;
@@ -463,8 +463,8 @@ html.light .resource-bar { background: #e2e8f0; }
 .resource-row { display: flex; align-items: center; gap: 0.5rem; }
 #disk-info { cursor: pointer; }
 #disk-info:hover { border-color: #3b82f6; }
-#vram-info.clickable { cursor: pointer; }
-#vram-info.clickable:hover { border-color: #3b82f6; }
+#ram-info.clickable { cursor: pointer; }
+#ram-info.clickable:hover { border-color: #3b82f6; }
 /* ── Disk usage treemap (non-modal floating dialog) ─────────────────────── */
 .disk-treemap-dialog {
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
@@ -606,27 +606,6 @@ html.light .model-name-unknown { color: #94a3b8; }
 /* ── Rogue / unrecognized local files ────────────────────────────────────── */
 .rogue-row .rogue-name { color: #f87171; }
 html.light .rogue-row .rogue-name { color: #dc2626; }
-/* ── KV cache context widget ─────────────────────────────────────────────── */
-.kv-cache-row {
-  display: flex; align-items: center; gap: 0.6rem;
-  padding: 6px 0 8px; flex-wrap: wrap;
-}
-.kv-cache-label {
-  display: flex; align-items: center; gap: 0.4rem;
-  font-size: 0.8rem; color: #94a3b8; white-space: nowrap;
-}
-.kv-cache-input {
-  width: 90px; padding: 3px 6px; border-radius: 4px;
-  border: 1px solid #334155; background: #1e293b; color: #f1f5f9;
-  font-size: 0.8rem; font-family: inherit;
-}
-.kv-cache-input:focus { outline: none; border-color: #60a5fa; }
-.kv-cache-estimate {
-  font-size: 0.78rem; color: #60a5fa; white-space: nowrap;
-}
-html.light .kv-cache-label { color: #64748b; }
-html.light .kv-cache-input { background: #f8fafc; border-color: #cbd5e1; color: #1e293b; }
-html.light .kv-cache-estimate { color: #2563eb; }
 /* ── Tags row ────────────────────────────────────────────────────────────── */
 .tags-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
 .badge-tag { background: #1e293b; color: #64748b; border: 1px solid #334155; font-weight: 400; }

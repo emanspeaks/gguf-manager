@@ -5,12 +5,13 @@ import { setLlamaServiceLabel } from './service-restart.js';
 import { downloadInProgress, setDownloadState, openSSE, setWarnThresholds } from './download.js';
 
 export let diskFreeBytes = 0;
+export let ramTotalBytes = 0;
 export let llamaSwapEnabled = false;
 export let atopwebURL = '';
 
-// Last successfully received GPU / VRAM values. Null = never received.
+// Last successfully received GPU / RAM values. Null = never received.
 // Kept across polls so a single probe failure doesn't flash the row away.
-let lastVramUsedBytes = null;
+let lastRamUsedBytes = null;
 let lastGpuPct = null;
 
 export async function pollStatus() {
@@ -35,7 +36,7 @@ export async function pollStatus() {
     }
     if (s.atopwebURL != null) {
       atopwebURL = resolveAtopwebURL(s.atopwebURL);
-      document.getElementById('vram-info').classList.toggle('clickable', !!s.atopwebURL);
+      document.getElementById('ram-info').classList.toggle('clickable', !!s.atopwebURL);
     }
     if (s.disk && s.disk.totalBytes > 0) {
       diskFreeBytes = s.disk.freeBytes;
@@ -46,19 +47,20 @@ export async function pollStatus() {
       document.getElementById('disk-text').textContent = formatBytes(s.disk.freeBytes) + ' free';
       document.getElementById('disk-info').style.display = 'flex';
     }
-    if (s.vramBytes > 0) {
-      const fill = document.getElementById('vram-bar-fill');
-      const text = document.getElementById('vram-text');
-      if (s.vramUsedKnown) lastVramUsedBytes = s.vramUsedBytes;
-      if (lastVramUsedBytes !== null) {
-        const pct = Math.round(lastVramUsedBytes / s.vramBytes * 100);
+    if (s.ramTotalBytes > 0) {
+      ramTotalBytes = s.ramTotalBytes;
+      const fill = document.getElementById('ram-bar-fill');
+      const text = document.getElementById('ram-text');
+      if (s.ramKnown) lastRamUsedBytes = s.ramUsedBytes;
+      if (lastRamUsedBytes !== null) {
+        const pct = Math.round(lastRamUsedBytes / s.ramTotalBytes * 100);
         fill.style.width = pct + '%';
         fill.className = 'resource-bar-fill ' + (pct >= 90 ? 'crit' : pct >= 75 ? 'warn' : 'ok');
-        text.textContent = 'VRAM: ' + formatBytes(lastVramUsedBytes) + ' / ' + formatBytes(s.vramBytes);
+        text.textContent = 'RAM: ' + formatBytes(lastRamUsedBytes) + ' / ' + formatBytes(s.ramTotalBytes);
       } else {
         fill.style.width = '0%';
         fill.className = 'resource-bar-fill ok';
-        text.textContent = 'VRAM: ? / ' + formatBytes(s.vramBytes);
+        text.textContent = 'RAM: ? / ' + formatBytes(s.ramTotalBytes);
       }
       const gpuRow = document.getElementById('gpu-row');
       if (s.gpuPctKnown) lastGpuPct = Math.round(s.gpuPct);
@@ -71,9 +73,9 @@ export async function pollStatus() {
       } else {
         gpuRow.style.display = 'none';
       }
-      document.getElementById('vram-info').style.display = 'flex';
+      document.getElementById('ram-info').style.display = 'flex';
     }
-    setWarnThresholds(s.warnDownloadBytes, s.warnVramBytes);
+    setWarnThresholds(s.warnDownloadBytes, s.warnRamBytes);
     // Update loaded state on model card alias pills without re-rendering
     if (s.loadedModels) {
       const loadedSet = new Set(s.loadedModels);
