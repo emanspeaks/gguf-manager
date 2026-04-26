@@ -183,6 +183,27 @@ func (s *Server) HandleDeleteFiles(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, strings.Join(errMsgs, "; "), http.StatusInternalServerError)
 		return
 	}
+
+	// If the repo dir is now effectively empty (no real files remain after
+	// filtering ignores), remove it the same way HandleDeleteRepo does.
+	remaining, _ := s.deps.ScanFilesRelative(repoDir)
+	remaining = s.deps.FilterIgnoredRelativeFiles(repoDir, remaining, s.cfg)
+	if len(remaining) == 0 {
+		if err := s.deps.RemoveAllWritable(repoDir); err != nil {
+			log.Printf("warning: remove empty repo dir %q: %v", repoDir, err)
+		} else {
+			log.Printf("removed empty repo dir %q", repoDir)
+			parentDir := filepath.Dir(repoDir)
+			if parentDir != filepath.Clean(s.cfg.ModelsDir) {
+				if entries, _ := os.ReadDir(parentDir); len(entries) == 0 {
+					if err := os.Remove(parentDir); err != nil {
+						log.Printf("warning: remove empty org dir %q: %v", parentDir, err)
+					}
+				}
+			}
+		}
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
