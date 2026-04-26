@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +35,36 @@ func writeHFCache(dir string, e hfCacheEntry) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(dir, hfCacheFilename), b, 0664)
+}
+
+// oldestDownloadedSha reads HF CLI download metadata for the given (already
+// filtered) relative file list and returns the repo commit sha from the file
+// with the oldest download timestamp. Starting from our own file list (not the
+// cache dir) ensures we ignore metadata for files we've since deleted or moved.
+func oldestDownloadedSha(repoDir string, files []string) string {
+	cacheBase := filepath.Join(repoDir, ".cache", "huggingface", "download")
+	var oldestSha string
+	var oldestTime float64 = -1
+	for _, f := range files {
+		data, err := os.ReadFile(filepath.Join(cacheBase, filepath.FromSlash(f)+".metadata"))
+		if err != nil {
+			continue
+		}
+		lines := strings.SplitN(strings.TrimRight(string(data), "\r\n"), "\n", 3)
+		if len(lines) < 3 {
+			continue
+		}
+		sha := strings.TrimSpace(lines[0])
+		ts, err := strconv.ParseFloat(strings.TrimSpace(lines[2]), 64)
+		if err != nil || sha == "" {
+			continue
+		}
+		if oldestTime < 0 || ts < oldestTime {
+			oldestTime = ts
+			oldestSha = sha
+		}
+	}
+	return oldestSha
 }
 
 type updateChecker struct {
@@ -115,14 +146,40 @@ func (uc *updateChecker) checkAll() {
 			subs, _ := os.ReadDir(dirPath)
 			for _, sub := range subs {
 				if sub.IsDir() {
-					uc.checkRepoDir(filepath.Join(dirPath, sub.Name()))
+					subPath := filepath.Join(dirPath, sub.Name())
+					uc.pruneIfEmpty(subPath)
+					uc.checkRepoDir(subPath)
+				}
+			}
+			// Prune org dir itself if it's now empty.
+			if entries, _ := os.ReadDir(dirPath); len(entries) == 0 {
+				if err := os.Remove(dirPath); err != nil {
+					log.Printf("update-check: remove empty org dir %q: %v", dirPath, err)
+				} else {
+					log.Printf("update-check: removed empty org dir %q", dirPath)
 				}
 			}
 		} else {
+			uc.pruneIfEmpty(dirPath)
 			uc.checkRepoDir(dirPath)
 		}
 	}
 	log.Printf("update-check: done, %d repo(s) with updates available", uc.PendingUpdateCount())
+}
+
+// pruneIfEmpty removes a repo dir when it contains no real files after
+// applying ignore rules. This catches dirs left behind by partial deletions.
+func (uc *updateChecker) pruneIfEmpty(dir string) {
+	files, _ := scanFilesRelative(dir)
+	files = filterIgnoredRelativeFiles(dir, files, uc.cfg)
+	if len(files) > 0 {
+		return
+	}
+	if err := removeAllWritable(dir); err != nil {
+		log.Printf("update-check: remove empty repo dir %q: %v", dir, err)
+	} else {
+		log.Printf("update-check: removed empty repo dir %q", dir)
+	}
 }
 
 func (uc *updateChecker) checkRepoDir(dir string) {
@@ -167,6 +224,12 @@ func (uc *updateChecker) checkRepoDir(dir string) {
 		return
 	}
 
+	// Always re-derive downloadedSha from HF CLI metadata on each full check.
+	// .w84cache is only trusted for the 23h short-circuit above.
+	files, _ := scanFilesRelative(dir)
+	files = filterIgnoredRelativeFiles(dir, files, uc.cfg)
+	e.DownloadedSha = oldestDownloadedSha(dir, files)
+
 	sha, err := fetchLatestSha(repoID, uc.cfg.HFToken)
 	if err != nil {
 		log.Printf("update-check: %s: %v", repoID, err)
@@ -174,7 +237,7 @@ func (uc *updateChecker) checkRepoDir(dir string) {
 	}
 
 	if e.DownloadedSha == "" {
-		// First time checking this repo: establish baseline, no update yet.
+		// No HF CLI metadata and no prior record: use current sha as baseline.
 		e.DownloadedSha = sha
 	}
 	e.LatestSha = sha
