@@ -419,6 +419,10 @@ function showMenu(e, node, state) {
   removeMenu();
   menuEl = document.createElement('div');
   menuEl.className = 'dtm-menu';
+  const dialogZ = Number.parseInt(dialogEl?.style.zIndex || '', 10);
+  if (Number.isFinite(dialogZ) && dialogZ > 0) {
+    menuEl.style.zIndex = String(dialogZ + 1);
+  }
 
   const copy = document.createElement('button');
   copy.className = 'dtm-menu-item';
